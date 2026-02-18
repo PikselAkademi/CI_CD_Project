@@ -1,0 +1,74 @@
+name: v1-ci-cd-ftp
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  SOLUTION_PATH: "V1.sln"
+  PROJECT_PATH: "V1.Web/V1.Web.csproj"
+  PUBLISH_DIR: "v1-publish"
+
+jobs:
+  ci:
+    name: CI (Build, Test, Publish)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore ${{ env.SOLUTION_PATH }}
+
+      - name: Build
+        run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test ${{ env.SOLUTION_PATH }} --configuration Release --no-build --verbosity normal
+
+      - name: Publish Web App
+        run: dotnet publish ${{ env.PROJECT_PATH }} --configuration Release --output ${{ env.PUBLISH_DIR }} --no-build
+
+      - name: Upload Publish Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v1-webapp-publish
+          path: ${{ env.PUBLISH_DIR }}
+          if-no-files-found: error
+
+  cd:
+    name: CD (Deploy via FTP/FTPS)
+    runs-on: ubuntu-latest
+    needs: ci
+
+    steps:
+      - name: Download Publish Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: v1-webapp-publish
+          path: ./artifact
+
+      - name: Deploy to FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.V1_FTP_SERVER }}
+          username: ${{ secrets.V1_FTP_USERNAME }}
+          password: ${{ secrets.V1_FTP_PASSWORD }}
+          protocol: ftp
+          port: 21
+          local-dir: ./artifact/
+          server-dir: ${{ vars.V1_FTP_REMOTE_DIR }}
+          dangerous-clean-slate: false
+

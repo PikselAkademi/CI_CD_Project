@@ -1,0 +1,50 @@
+﻿
+# İş akışı adı
+name: v1-dev-ci
+
+# Bu iş akışı, dev dalına yapılan push ve manuel tetikleme ile çalışır
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+# Ortam değişkenleri
+env:
+  # Dotnet sürümünü saklayan değişken
+  DOTNET_VERSION: "10.0.x"
+
+# İşler
+jobs:
+  # İş: ci
+  ci:
+    name: CI V1
+    # Runner, işin çalışacağı konak makine
+    runs-on: ubuntu-latest
+
+    # İşin adımları
+    steps:
+      # Adım: repository içeriğini kullanıma hazırlar
+      - name: Checkout
+        #adım içinde kullanılan hazır action
+        uses: actions/checkout@v4
+
+      # Adım: .NET Bağımlılıklarının kurulumunu yapar
+      - name: Setup .NET
+        #adım içinde kullanılan hazır action
+        uses: actions/setup-dotnet@v4
+        #hazır actiona parametre olarak ortam değişkeni olarak tanımlanan dotnet sürümü gönderiliyor
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Adım: Dotnet restore işlemi
+      - name: Restore
+        run: dotnet restore V1.sln
+
+      # Adım: Dotnet build işlemi, daha önce restore yapıldığı için --no-restore
+      - name: Build
+        run: dotnet build V1.sln --configuration Release --no-restore
+
+      # Adım: Dotnet test işlemi
+      - name: Test
+        run: dotnet test V1.sln --configuration Release --no-build --verbosity normal

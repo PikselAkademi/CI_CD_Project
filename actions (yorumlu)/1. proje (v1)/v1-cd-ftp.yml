@@ -1,0 +1,65 @@
+
+# İş akışı adı
+name: v1-cd-ftp
+
+# Bu iş akışı, v1-actions-v1-s04-ci-ftp-split workflow'ları tamamlandığında ile çalışır
+on:
+  workflow_run:
+    workflows:
+      - v1-actions-v1-s04-ci-ftp-split
+    types:
+      - completed
+
+# İzin ayarları
+permissions:
+  actions: read
+  contents: read
+
+# İşler
+jobs:
+  # İş: Artifact indirip hedef ortama deploy eder
+  deploy:
+    name: CD (Download Artifact + FTP Deploy)
+    # Bu iş, bağımlı workflow başarılıysa ve bağımlı workflow main dalından geldiyse çalışır
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    # Ortam ayarı
+    environment:
+      name: v1-production
+
+    # İşin adımları
+    steps:
+      # Adım: Artifact indirir
+      - name: Download Artifact from CI Workflow
+        # Adım içinde kullanılan hazır action
+        uses: actions/download-artifact@v4
+        # Hazır actiona parametreler gönderiliyor
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+          name: v1-s04-webapp-publish
+          path: ./artifact
+
+      # Adım: FTP ile deploy eder
+      - name: Deploy to FTP
+        # Adım içinde kullanılan hazır action
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        # Hazır actiona parametreler gönderiliyor
+        with:
+          #ftp sunucusu
+          server: ${{ secrets.V1_FTP_SERVER }}
+          #ftp kullanıcı adı
+          username: ${{ secrets.V1_FTP_USERNAME }}
+          #ftp şifresi
+          password: ${{ secrets.V1_FTP_PASSWORD }}
+          #protokol ftp, sftp...
+          protocol: ftp
+          port: 21
+          local-dir: ./artifact/
+          #hedef uygulama dizini
+          server-dir: ${{ vars.V1_FTP_REMOTE_DIR }}
+          dangerous-clean-slate: false
+
+

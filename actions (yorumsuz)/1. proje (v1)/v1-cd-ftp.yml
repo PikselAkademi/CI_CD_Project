@@ -1,0 +1,45 @@
+name: v1-cd-ftp
+
+on:
+  workflow_run:
+    workflows:
+      - v1-actions-v1-s04-ci-ftp-split
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  deploy:
+    name: CD (Download Artifact + FTP Deploy)
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    environment:
+      name: v1-production
+
+    steps:
+      - name: Download Artifact from CI Workflow
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+          name: v1-s04-webapp-publish
+          path: ./artifact
+
+      - name: Deploy to FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.V1_FTP_SERVER }}
+          username: ${{ secrets.V1_FTP_USERNAME }}
+          password: ${{ secrets.V1_FTP_PASSWORD }}
+          protocol: ftp
+          port: 21
+          local-dir: ./artifact/
+          server-dir: ${{ vars.V1_FTP_REMOTE_DIR }}
+          dangerous-clean-slate: false
+
+

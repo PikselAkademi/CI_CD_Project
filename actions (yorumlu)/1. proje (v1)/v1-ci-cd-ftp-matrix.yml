@@ -1,0 +1,145 @@
+
+# İş akışı adı
+name: v1-ci-cd-ftp-matrix
+
+# Bu iş akışı, main dalına yapılan push, main dalına açılan PR ve manuel tetikleme ile çalışır
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+
+# Ortam değişkenleri
+env:
+  # Dotnet sürümünü saklayan değişken
+  DOTNET_VERSION: "10.0.x"
+  # Solution dosyasının yolu
+  SOLUTION_PATH: "V1.sln"
+  # Proje dosyasının yolu
+  PROJECT_PATH: "V1.Web/V1.Web.csproj"
+  # Publish çıktısının yazılacağı klasör
+  PUBLISH_DIR: "v1-publish"
+
+# İşler
+jobs:
+  # İş: CI adımlarını matrix ile paralel çalıştırır
+  ci_matrix:
+    name: CI Matrix (${{ matrix.runner }})
+    # Runner, işin çalışacağı konak makine
+    runs-on: ${{ matrix.runner }}
+    # Strateji ayarı
+    strategy:
+      fail-fast: false
+      # Matrix ile paralel çalıştırma, farklı işlteim sistemleri senaryosu
+      matrix:
+        runner: [ubuntu-latest, windows-latest]
+
+    # İşin adımları
+    steps:
+      # Adım: Repository içeriğini kullanıma hazırlar
+      - name: Checkout
+        # Adım içinde kullanılan hazır action
+        uses: actions/checkout@v4
+
+      # Adım: .NET SDK kurulumunu yapar
+      - name: Setup .NET
+        # Adım içinde kullanılan hazır action
+        uses: actions/setup-dotnet@v4
+        # Hazır actiona parametreler gönderiliyor
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Adım: dotnet restore işlemi yapar
+      - name: Restore
+        run: dotnet restore ${{ env.SOLUTION_PATH }}
+
+      # Adım: dotnet build işlemi yapar (restore daha önce yapıldığı için tekrar restore etmez)
+      - name: Build
+        run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
+
+      # Adım: dotnet test işlemi yapar (build daha önce yapıldığı için tekrar build etmez)
+      - name: Test
+        run: dotnet test ${{ env.SOLUTION_PATH }} --configuration Release --no-build --verbosity normal
+
+  # İş: Publish çıktısını paketleyip artifact olarak yükler
+  package:
+    name: Package (Release Publish)
+    # Runner, işin çalışacağı konak makine
+    runs-on: ubuntu-latest
+    # ci_matrix tamamlandıktan sonra çalışır
+    needs: ci_matrix
+
+    # İşin adımları
+    steps:
+      # Adım: Repository içeriğini kullanıma hazırlar
+      - name: Checkout
+        # Adım içinde kullanılan hazır action
+        uses: actions/checkout@v4
+
+      # Adım: .NET SDK kurulumunu yapar
+      - name: Setup .NET
+        # Adım içinde kullanılan hazır action
+        uses: actions/setup-dotnet@v4
+        # Hazır actiona parametreler gönderiliyor
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Adım: dotnet restore işlemi yapar
+      - name: Restore
+        run: dotnet restore ${{ env.SOLUTION_PATH }}
+
+      # Adım: dotnet build işlemi yapar (restore daha önce yapıldığı için tekrar restore etmez)
+      - name: Build
+        run: dotnet build ${{ env.SOLUTION_PATH }} --configuration Release --no-restore
+
+      # Adım: dotnet publish işlemi yapar (build daha önce yapıldığı için tekrar build etmez)
+      - name: Publish Web App
+        run: dotnet publish ${{ env.PROJECT_PATH }} --configuration Release --output ${{ env.PUBLISH_DIR }} --no-build
+
+      # Adım: Çıktıyı artifact olarak yükler
+      - name: Upload Publish Artifact
+        # Adım içinde kullanılan hazır action
+        uses: actions/upload-artifact@v4
+        # Hazır actiona parametreler gönderiliyor
+        with:
+          name: v1-webapp-publish
+          path: ${{ env.PUBLISH_DIR }}
+          if-no-files-found: error
+
+  # İş: CD adımlarını yürütür, publish çıktısını deploy eder
+  cd:
+    name: CD (Deploy via FTP/FTPS)
+    # Runner, işin çalışacağı konak makine
+    runs-on: ubuntu-latest
+    needs: package
+
+    # İşin adımları
+    steps:
+      # Adım: Artifact indirir
+      - name: Download Publish Artifact
+        # Adım içinde kullanılan hazır action
+        uses: actions/download-artifact@v4
+        # Hazır actiona parametreler gönderiliyor
+        with:
+          name: v1-webapp-publish
+          path: ./artifact
+
+      # Adım: FTP ile deploy eder
+      - name: Deploy to FTP
+        # Adım içinde kullanılan hazır action
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        # Hazır actiona parametreler gönderiliyor
+        with:
+          server: ${{ secrets.V1_FTP_SERVER }}
+          username: ${{ secrets.V1_FTP_USERNAME }}
+          password: ${{ secrets.V1_FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          local-dir: ./artifact/
+          server-dir: ${{ vars.V1_FTP_REMOTE_DIR }}
+          dangerous-clean-slate: false
+

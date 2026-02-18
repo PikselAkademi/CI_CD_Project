@@ -1,0 +1,33 @@
+﻿name: v1-dev-ci
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: "10.0.x"
+
+jobs:
+  ci:
+    name: CI V1
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore V1.sln
+
+      - name: Build
+        run: dotnet build V1.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test V1.sln --configuration Release --no-build --verbosity normal

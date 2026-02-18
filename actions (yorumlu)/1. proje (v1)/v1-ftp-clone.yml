@@ -1,0 +1,84 @@
+﻿
+# İş akışı adı
+name: v1-ftp-clone
+
+
+# Bu iş akışı, manuel tetikleme ile çalışır
+on:
+  workflow_dispatch:
+    inputs:
+      source_dir:
+        #kaynak ftp dizini
+        required: true
+        default: /site/wwwroot/
+      target_dir:
+        #hedef ftp dizini
+        required: true
+        default: /site/wwwroot/
+      delete_extra:
+        # hedefteki dosya kaynakta yoksa siler
+        type: boolean
+        required: true
+        default: false
+
+# İşler
+jobs:
+  # İş: ftp_clone
+  ftp_clone:
+    name: FTP Clone V1
+    # Runner, işin çalışacağı konak makine
+    runs-on: ubuntu-latest
+    # Ortam değişkenleri
+    env:
+      # Kaynak ftp sunucusunu saklayan değişken
+      SRC_SERVER: ${{ secrets.V1_SOURCE_FTP_SERVER }}
+      # Kaynak için kullanıcı adını saklayan değişken
+      SRC_USERNAME: ${{ secrets.V1_SOURCE_FTP_USERNAME }}
+      # Kaynak için şifre bilgisini saklayan değişken
+      SRC_PASSWORD: ${{ secrets.V1_SOURCE_FTP_PASSWORD }}
+      # Hedef ftp sunucusunu saklayan değişken
+      DST_SERVER: ${{ secrets.V1_TARGET_FTP_SERVER }}
+      # Hedef için kullanıcı adını saklayan değişken
+      DST_USERNAME: ${{ secrets.V1_TARGET_FTP_USERNAME }}
+      # Hedef için şifre bilgisini saklayan değişken
+      DST_PASSWORD: ${{ secrets.V1_TARGET_FTP_PASSWORD }}
+
+    # İşin adımları
+    steps:
+      # Adım: yapılandırmayı test eder
+      - name: Validate configuration
+        run: |
+          test -n "$SRC_SERVER"
+          test -n "$SRC_USERNAME"
+          test -n "$SRC_PASSWORD"
+          test -n "$DST_SERVER"
+          test -n "$DST_USERNAME"
+          test -n "$DST_PASSWORD"
+
+      # lftp aracını indirir
+      - name: Install lftp
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lftp
+
+      #Kaynak uygulamayı indirir
+      - name: Mirror source FTP to runner
+        run: |
+          set -e
+          LOCAL_DIR="$RUNNER_TEMP/ftp-clone"
+          rm -rf "$LOCAL_DIR"
+          mkdir -p "$LOCAL_DIR"
+
+          lftp -u "$SRC_USERNAME","$SRC_PASSWORD" "$SRC_SERVER" -e "set ssl:verify-certificate no; set ftp:passive-mode true; mirror --verbose '${{ inputs.source_dir }}' '$LOCAL_DIR'; bye"
+
+      #İndirilen kaynak dosyalarını hedef sunucuya yükler, hedef sunucudaki fazla dosyaları siler
+      - name: Mirror runner to target FTP
+        run: |
+          set -e
+          LOCAL_DIR="$RUNNER_TEMP/ftp-clone"
+          DELETE_FLAG=""
+          if [ "${{ inputs.delete_extra }}" = "true" ]; then
+            DELETE_FLAG="--delete"
+          fi
+
+          lftp -u "$DST_USERNAME","$DST_PASSWORD" "$DST_SERVER" -e "set ssl:verify-certificate no; set ftp:passive-mode true; mirror -R --verbose $DELETE_FLAG '$LOCAL_DIR' '${{ inputs.target_dir }}'; bye"
