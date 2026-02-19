@@ -1,3 +1,4 @@
+
 name: v1-ci-ftp
 
 on:
@@ -44,7 +45,7 @@ jobs:
       - name: Upload Publish Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: v1-s04-webapp-publish
+          name: v1-webapp-publish
           path: ${{ env.PUBLISH_DIR }}
           if-no-files-found: error
           retention-days: 7

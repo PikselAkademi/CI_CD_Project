@@ -1,0 +1,99 @@
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  DOTNET_VERSION: '10.0.x'
+  SOLUTION_PATH: 'V1.sln'
+  PROJECT_PATH: 'V1.Web/V1.Web.csproj'
+  PUBLISH_DIR: '$(Build.ArtifactStagingDirectory)/v1-publish'
+
+jobs:
+- job: build_test
+  displayName: CI Matrix (Build + Test)
+  strategy:
+    matrix:
+      ubuntu:
+        vmImage: ubuntu-latest
+      windows:
+        vmImage: windows-latest
+
+  pool:
+    vmImage: $(vmImage)
+
+  steps:
+  - checkout: self
+
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  - script: dotnet restore $(SOLUTION_PATH)
+    displayName: Restore
+
+  - script: dotnet build $(SOLUTION_PATH) -c Release --no-restore
+    displayName: Build
+
+  - script: dotnet test $(SOLUTION_PATH) -c Release --no-build --verbosity normal
+    displayName: Test
+
+- job: package
+  displayName: Package (Release Publish)
+  dependsOn: build_test
+  pool:
+    vmImage: ubuntu-latest
+
+  steps:
+  - checkout: self
+
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  - script: dotnet restore $(SOLUTION_PATH)
+    displayName: Restore
+
+  - script: dotnet build $(SOLUTION_PATH) -c Release --no-restore
+    displayName: Build
+
+  - script: dotnet publish $(PROJECT_PATH) -c Release -o $(PUBLISH_DIR) --no-build
+    displayName: Publish
+
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: '$(PUBLISH_DIR)'
+      ArtifactName: 'v1-webapp-publish'
+      publishLocation: 'Container'
+
+- job: cd
+  displayName: CD (Deploy via FTP/FTPS)
+  dependsOn: package
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+  pool:
+    vmImage: ubuntu-latest
+
+  steps:
+  - task: DownloadBuildArtifacts@0
+    inputs:
+      buildType: current
+      downloadType: single
+      artifactName: v1-webapp-publish
+      downloadPath: '$(Pipeline.Workspace)'
+
+  - bash: |
+      sudo apt-get update
+      sudo apt-get install -y lftp
+      lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER" -e "set ftp:ssl-force true; set ftp:ssl-protect-data true; mirror -R --verbose $(Pipeline.Workspace)/v1-webapp-publish $FTP_REMOTE_DIR; bye"
+    displayName: Deploy via FTP
+    env:
+      FTP_SERVER: $(V1_FTP_SERVER)
+      FTP_USERNAME: $(V1_FTP_USERNAME)
+      FTP_PASSWORD: $(V1_FTP_PASSWORD)
+      FTP_REMOTE_DIR: $(V1_FTP_REMOTE_DIR)

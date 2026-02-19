@@ -1,0 +1,45 @@
+
+trigger: none
+pr: none
+
+# Bu iş akışı, v1-ci-ftp pipeline'ı tamamlandığında çalışır
+resources:
+  pipelines:
+    - pipeline: ci
+      source: v1-ci-ftp
+      trigger:
+        branches:
+          include:
+            - main
+
+# Runner, işin çalışacağı konak makine
+pool:
+  vmImage: ubuntu-latest
+
+# İşler
+jobs:
+# İş: Artifact indirip hedef ortama deploy eder
+- job: deploy
+  displayName: CD (Download Artifact + FTP Deploy)
+  # İşin adımları
+  steps:
+  # Adım: Artifact indirir
+  - download: ci
+    artifact: v1-webapp-publish
+    
+  # Adım: FTP ile deploy eder
+  - bash: |
+      sudo apt-get update
+      sudo apt-get install -y lftp
+      lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER" -e "set ftp:ssl-force true; set ftp:ssl-protect-data true; mirror -R --verbose $(Pipeline.Workspace)/ci/v1-s04-webapp-publish $FTP_REMOTE_DIR; bye"
+    displayName: Deploy via FTP
+    # Hazır taska parametreler gönderiliyor
+    env:
+      # ftp sunucusu
+      FTP_SERVER: $(V1_FTP_SERVER)
+      # ftp kullanıcı adı
+      FTP_USERNAME: $(V1_FTP_USERNAME)
+      # ftp şifresi
+      FTP_PASSWORD: $(V1_FTP_PASSWORD)
+      # hedef uygulama dizini
+      FTP_REMOTE_DIR: $(V1_FTP_REMOTE_DIR)

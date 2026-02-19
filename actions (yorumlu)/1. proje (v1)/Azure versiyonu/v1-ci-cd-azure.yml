@@ -1,0 +1,99 @@
+
+# Bu iş akışı, main dalına yapılan push, main dalına açılan PR ve manuel tetikleme ile çalışır
+trigger:
+  branches:
+    include:
+      - main
+
+# PR doğrulama: main dalına
+pr:
+  branches:
+    include:
+      - main
+
+# Ortam değişkenleri
+variables:
+  # Dotnet sürümünü saklayan değişken
+  DOTNET_VERSION: '10.0.x'
+  # Solution dosyasının yolu
+  SOLUTION_PATH: 'V1.sln'
+  # Proje dosyasının yolu
+  PROJECT_PATH: 'V1.Web/V1.Web.csproj'
+  # Publish çıktısının yazılacağı klasör
+  PUBLISH_DIR: '$(Build.ArtifactStagingDirectory)/v1-publish'
+  # Azure bağlantı bilgisini saklayan değişken
+  AZURE_SERVICE_CONNECTION: '$(V1_AZURE_SERVICE_CONNECTION)'
+  # Azure Web App adını saklayan değişken
+  AZURE_WEBAPP_NAME: '$(V1_AZURE_WEBAPP_NAME)'
+
+# İşler
+jobs:
+# İş: CI adımlarını yürütür (build/test/publish)
+- job: ci
+  displayName: CI (Build, Test, Publish)
+  # Runner, işin çalışacağı konak makine
+  pool:
+    vmImage: ubuntu-latest
+  # İşin adımları
+  steps:
+  # Adım: Repository içeriğini kullanıma hazırlar
+  - checkout: self # Adım içinde kullanılan hazır task
+
+  # Adım: .NET SDK kurulumunu yapar
+  - task: UseDotNet@2 # Adım içinde kullanılan hazır task
+    # Hazır taska parametreler gönderiliyor
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  # Adım: dotnet restore işlemi yapar
+  - script: dotnet restore $(SOLUTION_PATH)
+    displayName: Restore
+
+  # Adım: dotnet build işlemi yapar (restore daha önce yapıldığı için tekrar restore etmez)
+  - script: dotnet build $(SOLUTION_PATH) -c Release --no-restore
+    displayName: Build
+
+  # Adım: dotnet test işlemi yapar (build daha önce yapıldığı için tekrar build etmez)
+  - script: dotnet test $(SOLUTION_PATH) -c Release --no-build --verbosity normal
+    displayName: Test
+
+  # Adım: dotnet publish işlemi yapar (build daha önce yapıldığı için tekrar build etmez)
+  - script: dotnet publish $(PROJECT_PATH) -c Release -o $(PUBLISH_DIR) --no-build
+    displayName: Publish
+
+  # Adım: Çıktıyı artifact olarak yükler
+  - task: PublishBuildArtifacts@1 # Adım içinde kullanılan hazır task
+    # Hazır taska parametreler gönderiliyor
+    inputs:
+      PathtoPublish: '$(PUBLISH_DIR)'
+      ArtifactName: 'v1-webapp-publish'
+      publishLocation: 'Container'
+
+# İş: CD adımlarını yürütür, publish çıktısını deploy eder
+- job: cd
+  displayName: CD (Deploy to Azure App Service)
+  dependsOn: ci
+  # Bu iş, önceki adımlar başarılıysa çalışır
+  condition: succeeded()
+  # Runner, işin çalışacağı konak makine
+  pool:
+    vmImage: ubuntu-latest
+  # İşin adımları
+  steps:
+  # Adım: Artifact indirir
+  - task: DownloadBuildArtifacts@0 # Adım içinde kullanılan hazır task
+    # Hazır taska parametreler gönderiliyor
+    inputs:
+      buildType: current
+      downloadType: single
+      artifactName: v1-webapp-publish
+      downloadPath: '$(Pipeline.Workspace)'
+
+  # Adım: Azure Web App'e deploy eder
+  - task: AzureWebApp@1 # Adım içinde kullanılan hazır task
+    # Hazır taska parametreler gönderiliyor
+    inputs:
+      azureSubscription: '$(AZURE_SERVICE_CONNECTION)'
+      appType: webApp
+      appName: '$(AZURE_WEBAPP_NAME)'
+      package: '$(Pipeline.Workspace)/v1-webapp-publish'

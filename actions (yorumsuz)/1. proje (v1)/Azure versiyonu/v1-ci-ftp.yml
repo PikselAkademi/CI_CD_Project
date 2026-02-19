@@ -1,0 +1,47 @@
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  DOTNET_VERSION: '10.0.x'
+  SOLUTION_PATH: 'V1.sln'
+  PROJECT_PATH: 'V1.Web/V1.Web.csproj'
+  PUBLISH_DIR: '$(Build.ArtifactStagingDirectory)/v1-publish'
+
+pool:
+  vmImage: ubuntu-latest
+
+jobs:
+- job: ci
+  displayName: CI (Build, Test, Publish Artifact)
+  steps:
+  - checkout: self
+
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  - script: dotnet restore $(SOLUTION_PATH)
+    displayName: Restore
+
+  - script: dotnet build $(SOLUTION_PATH) -c Release --no-restore
+    displayName: Build
+
+  - script: dotnet test $(SOLUTION_PATH) -c Release --no-build --verbosity normal
+    displayName: Test
+
+  - script: dotnet publish $(PROJECT_PATH) -c Release -o $(PUBLISH_DIR) --no-build
+    displayName: Publish
+
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: '$(PUBLISH_DIR)'
+      ArtifactName: 'v1-webapp-publish'
+      publishLocation: 'Container'

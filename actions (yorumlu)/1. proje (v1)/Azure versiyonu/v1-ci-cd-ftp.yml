@@ -1,0 +1,103 @@
+
+# Bu iş akışı, main dalına yapılan push, main dalına açılan PR ve manuel tetikleme ile çalışır
+trigger:
+  branches:
+    include:
+      - main
+
+# PR doğrulama: main dalına
+pr:
+  branches:
+    include:
+      - main
+
+# Ortam değişkenleri
+variables:
+  # Dotnet sürümünü saklayan değişken
+  DOTNET_VERSION: '10.0.x'
+  # Solution dosyasının yolu
+  SOLUTION_PATH: 'V1.sln'
+  # Proje dosyasının yolu
+  PROJECT_PATH: 'V1.Web/V1.Web.csproj'
+  # Publish çıktısının yazılacağı klasör
+  PUBLISH_DIR: '$(Build.ArtifactStagingDirectory)/v1-publish'
+
+# İşler
+jobs:
+# İş: CI adımlarını yürütür (build/test/publish)
+- job: ci
+  displayName: CI (Build, Test, Publish)
+  # Runner, işin çalışacağı konak makine
+  pool:
+    vmImage: ubuntu-latest
+  # İşin adımları
+  steps:
+  # Adım: Repository içeriğini kullanıma hazırlar
+  - checkout: self
+
+  # Adım: .NET SDK kurulumunu yapar
+  - task: UseDotNet@2
+    # Hazır taska parametreler gönderiliyor
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  # Adım: dotnet restore işlemi yapar
+  - script: dotnet restore $(SOLUTION_PATH)
+    displayName: Restore
+
+  # Adım: dotnet build işlemi yapar 
+  - script: dotnet build $(SOLUTION_PATH) -c Release --no-restore
+    displayName: Build
+
+  # Adım: dotnet test işlemi yapar 
+  - script: dotnet test $(SOLUTION_PATH) -c Release --no-build --verbosity normal
+    displayName: Test
+
+  # Adım: dotnet publish işlemi yapar 
+  - script: dotnet publish $(PROJECT_PATH) -c Release -o $(PUBLISH_DIR) --no-build
+    displayName: Publish
+
+  # Adım: Çıktıyı artifact olarak yükler
+  - task: PublishBuildArtifacts@1
+    # Hazır taska parametreler gönderiliyor
+    inputs:
+      PathtoPublish: '$(PUBLISH_DIR)'
+      ArtifactName: 'v1-webapp-publish'
+      publishLocation: 'Container'
+
+# İş: CD adımlarını yürütür, publish çıktısını deploy eder
+- job: cd
+  displayName: CD (Deploy via FTP/FTPS)
+  dependsOn: ci
+  # Bu iş, önceki adımlar başarılıysa, main dalındaysa ve PR değilse çalışır
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+  # Runner, işin çalışacağı konak makine
+  pool:
+    vmImage: ubuntu-latest
+  # İşin adımları
+  steps:
+  # Adım: Artifact indirir
+  - task: DownloadBuildArtifacts@0
+    # Hazır taska parametreler gönderiliyor
+    inputs:
+      buildType: current
+      downloadType: single
+      artifactName: v1-webapp-publish
+      downloadPath: '$(Pipeline.Workspace)'
+
+  # Adım: FTP ile deploy eder
+  - bash: |
+      sudo apt-get update
+      sudo apt-get install -y lftp
+      lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER" -e "set ftp:ssl-force true; set ftp:ssl-protect-data true; mirror -R --verbose $(Pipeline.Workspace)/v1-webapp-publish $FTP_REMOTE_DIR; bye"
+    displayName: Deploy via FTP
+    # Adımın ortam değişkenleri
+    env:
+      # ftp sunucusu
+      FTP_SERVER: $(V1_FTP_SERVER)
+      # ftp kullanıcı adı
+      FTP_USERNAME: $(V1_FTP_USERNAME)
+      # ftp şifresi
+      FTP_PASSWORD: $(V1_FTP_PASSWORD)
+      # hedef uygulama dizini
+      FTP_REMOTE_DIR: $(V1_FTP_REMOTE_DIR)

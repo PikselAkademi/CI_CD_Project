@@ -1,0 +1,29 @@
+
+trigger:
+  branches:
+    include:
+      - dev
+
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  DOTNET_VERSION: '10.0.x'
+
+jobs:
+- job: ci
+  displayName: CI V1 (Build + Test)
+  steps:
+  - checkout: self
+
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  - script: dotnet restore V1.sln
+
+  - script: dotnet build V1.sln -c Release --no-restore
+  
+  - script: dotnet test V1.sln -c Release --no-build --verbosity normal

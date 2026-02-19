@@ -1,0 +1,79 @@
+
+# Bu iş akışı, manuel tetikleme ile çalışır
+trigger: none
+pr: none
+
+# Girdi parametreleri
+parameters:
+- name: sourceDir
+  # kaynak ftp dizini
+  displayName: Source remote directory
+  type: string
+  default: /site/wwwroot/
+- name: targetDir
+  # hedef ftp dizini
+  displayName: Target remote directory
+  type: string
+  default: /site/wwwroot/
+- name: deleteExtra
+  # hedefteki dosya kaynakta yoksa siler
+  displayName: Delete files on target that do not exist on source
+  type: boolean
+  default: false
+
+# Runner, işin çalışacağı konak makine
+pool:
+  vmImage: ubuntu-latest
+
+# İşin adımları
+steps:
+# Adım: yapılandırmayı test eder
+- bash: |
+    set -e
+    test -n "$SRC_SERVER"
+    test -n "$SRC_USERNAME"
+    test -n "$SRC_PASSWORD"
+    test -n "$DST_SERVER"
+    test -n "$DST_USERNAME"
+    test -n "$DST_PASSWORD"
+  displayName: Validate configuration
+  env:
+    SRC_SERVER: $(V1_SOURCE_FTP_SERVER)
+    SRC_USERNAME: $(V1_SOURCE_FTP_USERNAME)
+    SRC_PASSWORD: $(V1_SOURCE_FTP_PASSWORD)
+    DST_SERVER: $(V1_TARGET_FTP_SERVER)
+    DST_USERNAME: $(V1_TARGET_FTP_USERNAME)
+    DST_PASSWORD: $(V1_TARGET_FTP_PASSWORD)
+
+# Adım: lftp aracını indirir
+- bash: |
+    sudo apt-get update
+    sudo apt-get install -y lftp
+  displayName: Install lftp
+
+# Adım: Kaynak uygulamayı indirir ve hedef sunucuya yükler, hedefteki fazla dosyaları siler
+- bash: |
+    set -e
+    LOCAL_DIR="$(Agent.TempDirectory)/ftp-clone"
+    rm -rf "$LOCAL_DIR"
+    mkdir -p "$LOCAL_DIR"
+
+    lftp -u "$SRC_USERNAME","$SRC_PASSWORD" "$SRC_SERVER" -e "set ssl:verify-certificate no; set ftp:passive-mode true; mirror --verbose '$SOURCE_DIR' '$LOCAL_DIR'; bye"
+
+    DELETE_FLAG=""
+    if [ "$DELETE_EXTRA" = "true" ]; then
+      DELETE_FLAG="--delete"
+    fi
+
+    lftp -u "$DST_USERNAME","$DST_PASSWORD" "$DST_SERVER" -e "set ssl:verify-certificate no; set ftp:passive-mode true; mirror -R --verbose $DELETE_FLAG '$LOCAL_DIR' '$TARGET_DIR'; bye"
+  displayName: FTP mirror source to target
+  env:
+    SRC_SERVER: $(V1_SOURCE_FTP_SERVER) #ftp kaynak sunucu adresi
+    SRC_USERNAME: $(V1_SOURCE_FTP_USERNAME) #ftp kaynak kullanıcı adı
+    SRC_PASSWORD: $(V1_SOURCE_FTP_PASSWORD) #ftp kaynak kullanıcı şifresi
+    DST_SERVER: $(V1_TARGET_FTP_SERVER) #ftp hedef sunucu adresi
+    DST_USERNAME: $(V1_TARGET_FTP_USERNAME) #ftp hedef kullanıcı adı
+    DST_PASSWORD: $(V1_TARGET_FTP_PASSWORD) #ftp hedef kullanıcı şifresi
+    SOURCE_DIR: ${{ parameters.sourceDir }} #ftp kaynak dizini
+    TARGET_DIR: ${{ parameters.targetDir }} #ftp hedef dizini
+    DELETE_EXTRA: ${{ parameters.deleteExtra }} #fazla dosyalar silinsin mi

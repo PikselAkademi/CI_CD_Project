@@ -1,0 +1,65 @@
+
+# Bu iş akışı, main dalına yapılan push, main dalına açılan PR ve manuel tetikleme ile çalışır
+trigger:
+  branches:
+    include:
+      - main
+
+# PR doğrulama: main dalına
+pr:
+  branches:
+    include:
+      - main
+
+# Ortam değişkenleri
+variables:
+  # Dotnet sürümünü saklayan değişken
+  DOTNET_VERSION: '10.0.x'
+  # Solution dosyasının yolu
+  SOLUTION_PATH: 'V1.sln'
+  # Proje dosyasının yolu
+  PROJECT_PATH: 'V1.Web/V1.Web.csproj'
+  # Publish çıktısının yazılacağı klasör
+  PUBLISH_DIR: '$(Build.ArtifactStagingDirectory)/v1-publish'
+
+# Runner, işin çalışacağı konak makine
+pool:
+  vmImage: ubuntu-latest
+
+# İşler
+jobs:
+# İş: CI adımlarını yürütür (build/test/publish)
+- job: ci
+  displayName: CI (Build, Test, Publish Artifact)
+  # İşin adımları
+  steps:
+  # Adım: Repository içeriğini kullanıma hazırlar
+  - checkout: self
+
+  # Adım: .NET SDK kurulumunu yapar
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  # Adım: dotnet restore işlemi yapar
+  - script: dotnet restore $(SOLUTION_PATH)
+    displayName: Restore
+
+  # Adım: dotnet build işlemi yapar 
+  - script: dotnet build $(SOLUTION_PATH) -c Release --no-restore
+    displayName: Build
+
+  # Adım: dotnet test işlemi yapar 
+  - script: dotnet test $(SOLUTION_PATH) -c Release --no-build --verbosity normal
+    displayName: Test
+
+  # Adım: dotnet publish işlemi yapar 
+  - script: dotnet publish $(PROJECT_PATH) -c Release -o $(PUBLISH_DIR) --no-build
+    displayName: Publish
+
+  # Adım: Çıktıyı artifact olarak yükler
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: '$(PUBLISH_DIR)'
+      ArtifactName: 'v1-webapp-publish'
+      publishLocation: 'Container'

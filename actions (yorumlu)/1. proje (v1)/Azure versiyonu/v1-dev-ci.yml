@@ -1,0 +1,42 @@
+
+# Bu iş akışı, dev dalına yapılan push ve manuel tetikleme ile çalışır
+trigger:
+  branches:
+    include:
+      - dev
+
+pr: none
+
+# Runner, işin çalışacağı konak makine
+pool:
+  vmImage: ubuntu-latest
+
+# Ortam değişkenleri
+variables:
+  # Dotnet sürümünü saklayan değişken
+  DOTNET_VERSION: '10.0.x'
+
+# İşler
+jobs:
+# İş: ci
+- job: ci
+  displayName: CI V1 (Build + Test)
+  # İşin adımları
+  steps:
+  # Adım: repository içeriğini kullanıma hazırlar
+  - checkout: self # adım içinde kullanılan hazır task
+
+  # Adım: .NET Bağımlılıklarının kurulumunu yapar
+  - task: UseDotNet@2 # adım içinde kullanılan hazır task
+    # hazır taska parametre olarak ortam değişkeni olarak tanımlanan dotnet sürümü gönderiliyor
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  # Adım: Dotnet restore işlemi
+  - script: dotnet restore V1.sln
+
+  # Adım: Dotnet build işlemi, daha önce restore yapıldığı için --no-restore
+  - script: dotnet build V1.sln -c Release --no-restore
+  
+  # Adım: Dotnet test işlemi
+  - script: dotnet test V1.sln -c Release --no-build --verbosity normal

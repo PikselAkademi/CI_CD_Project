@@ -1,9 +1,10 @@
+
 name: v1-cd-ftp
 
 on:
   workflow_run:
     workflows:
-      - v1-actions-v1-s04-ci-ftp-split
+      - v1-ci-ftp
     types:
       - completed
 
@@ -27,7 +28,7 @@ jobs:
         with:
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
-          name: v1-s04-webapp-publish
+          name: v1-webapp-publish
           path: ./artifact
 
       - name: Deploy to FTP
