@@ -1,33 +1,47 @@
 # CI CD Eğitimi İçeriği
 
 ### Repository İçeriği
-- __CI-CD.pdf__
+- __CI-CD.pdf__     
+  [Dosyayı Aç](https://github.com/PikselAkademi/CI_CD_Project/blob/main/CI-CD.pdf)
   > Eğitim sırasında kullanılan sunumun PDF versiyonu
-- __CI-CD_Azure.pdf__
-  > Eğitimde kullanılan sunuma Azure Pipelines eklenmiş versiyonu
-- __workshop__
+- __CI-CD_Azure.pdf__   
+  [Dosyayı Aç](https://github.com/PikselAkademi/CI_CD_Project/blob/main/CI-CD_Azure.pdf)
+  > Eğitimde kullanılan sunuma Azure Pipelines eklenmiş versiyonu    
+- __workshop__   
+  [Dizine Git](https://github.com/PikselAkademi/CI_CD_Project/tree/main/workshop)
   > Eğitimde kullandığımız örnek projelerin kodları
-- __Microservice CI CD (IIS msdeploy)__
+- __Microservice CI CD (IIS msdeploy)__   
+  [Dizine Git](https://github.com/PikselAkademi/CI_CD_Project/tree/main/Microservice%20CI%20CD%20(IIS%20msdeploy))
   > Microservice projesinde bütün servisleri msdeploy ile IIS'e gönderen CI/CD akışı örneği
-- __actions (yorumsuz)__
+- __actions (yorumsuz)__    
+  [Dizine Git](https://github.com/PikselAkademi/CI_CD_Project/tree/main/actions%20(yorumsuz))
   > Yorum satırı bulunmayan workflow örnekleri
-  * __1. proje (v1)__
+  * __1. proje (v1)__   
+    [Dizine Git](https://github.com/PikselAkademi/CI_CD_Project/tree/main/actions%20(yorumsuz)/1.%20proje%20(v1))
     > GitHub Actions için yml dosyaları bu dizinde yer almakta
-    - __Azure versiyonu__ 
+    - __Azure versiyonu__    
+      [Dizine Git](https://github.com/PikselAkademi/CI_CD_Project/tree/main/actions%20(yorumsuz)/1.%20proje%20(v1)/Azure%20versiyonu)
       > Azure DevOps Pipelines için yml dosyaları bu dizinde yer almakta
-  * __2. proje (v2)__
+  * __2. proje (v2)__   
+    [Dizine Git](https://github.com/PikselAkademi/CI_CD_Project/tree/main/actions%20(yorumsuz)/2.%20proje%20(v2))
     > GitHub Actions için yml dosyaları bu dizinde yer almakta
-    - __Azure versiyonu__
+    - __Azure versiyonu__   
+      [Dizine Git](https://github.com/PikselAkademi/CI_CD_Project/tree/main/actions%20(yorumsuz)/2.%20proje%20(v2)/Azure%20versiyonu)
       > Azure DevOps Pipelines için yml dosyaları bu dizinde yer almakta
-- __actions (yorumlu)__
+- __actions (yorumlu)__   
+  [Dizine Git](https://github.com/PikselAkademi/CI_CD_Project/tree/main/actions%20(yorumlu))
   > Yorum satırı bulunan workflow örnekleri
-  * __1. proje (v1)__
+  * __1. proje (v1)__   
+    [Dizine Git](https://github.com/PikselAkademi/CI_CD_Project/tree/main/actions%20(yorumlu)/1.%20proje%20(v1))
     > GitHub Actions için yml dosyaları bu dizinde yer almakta
-    - __Azure versiyonu__
+    - __Azure versiyonu__   
+      [Dizine Git](https://github.com/PikselAkademi/CI_CD_Project/tree/main/actions%20(yorumlu)/1.%20proje%20(v1)/Azure%20versiyonu)
       > Azure DevOps Pipelines için yml dosyaları bu dizinde yer almakta
-  * __2. proje (v2)__
+  * __2. proje (v2)__   
+    [Dizine Git](https://github.com/PikselAkademi/CI_CD_Project/tree/main/actions%20(yorumlu)/2.%20proje%20(v2))
     > GitHub Actions için yml dosyaları bu dizinde yer almakta
-    - __Azure versiyonu__
+    - __Azure versiyonu__   
+      [Dizine Git](https://github.com/PikselAkademi/CI_CD_Project/tree/main/actions%20(yorumlu)/2.%20proje%20(v2)/Azure%20versiyonu)
       > Azure DevOps Pipelines için yml dosyaları bu dizinde yer almakta
 
 ---
