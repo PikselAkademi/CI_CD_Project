@@ -1,0 +1,107 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: [ "CI" ]    
+    types: [ completed ]
+    branches: [ master ]
+
+permissions: write-all
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          #GRPC
+          - artifact: KB.PikselPlatform.BranchService.Api.Grpc
+            site: BranchServiceGrpc
+          - artifact: KB.PikselPlatform.CourseService.Api.Grpc
+            site: CourseServiceGrpc
+          - artifact: KB.PikselPlatform.InterviewService.Api.Grpc
+            site: InterviewServiceGrpc
+          - artifact: KB.PikselPlatform.LeadService.Api.Grpc
+            site: LeadServiceGrpc
+          - artifact: KB.PikselPlatform.LectureService.Api.Grpc
+            site: LectureServiceGrpc
+          - artifact: KB.PikselPlatform.RegisterService.Api.Grpc
+            site: RegisterServiceGrpc
+          - artifact: KB.PikselPlatform.UserService.Api.Grpc
+            site: UserServiceGrpc
+
+          #REST 
+          - artifact: KB.PikselPlatform.BranchService.Api.Rest
+            site: BranchServiceRest
+          - artifact: KB.PikselPlatform.CourseService.Api.Rest
+            site: CourseServiceRest
+          - artifact: KB.PikselPlatform.InterviewService.Api.Rest
+            site: InterviewServiceRest
+          - artifact: KB.PikselPlatform.LeadService.Api.Rest
+            site: LeadServiceRest
+          - artifact: KB.PikselPlatform.LectureService.Api.Rest
+            site: LectureServiceRest
+          - artifact: KB.PikselPlatform.RegisterService.Api.Rest
+            site: RegisterServiceRest
+          - artifact: KB.PikselPlatform.UserService.Api.Rest
+            site: UserServiceRest
+
+          #Gateway 
+          - artifact: KB.PikselPlatform.ApiGateway
+            site: ApiGateway
+
+          #UI 
+          - artifact: KB.PikselPlatform.Admin.Ui
+            site: AdminUi
+          - artifact: KB.PikselPlatform.Management.Ui
+            site: ManagementUi
+          - artifact: KB.PikselPlatform.Portal.Ui
+            site: PortalUi
+
+    steps:
+      - name: Download artifact (if exists)
+        id: dl
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}                  
+          path: ${{ runner.temp }}\${{ matrix.artifact }}
+          run-id: ${{ github.event.workflow_run.id }}  
+          github-token: ${{ github.token }}
+        continue-on-error: true
+
+      - name: Skip if artifact not found
+        if: steps.dl.outcome != 'success'
+        run: echo "No artifact for ${{ matrix.artifact }}. Skipping."
+
+      - name: Unzip
+        if: steps.dl.outcome == 'success'
+        run: |
+          $zip = Join-Path "${{ runner.temp }}\${{ matrix.artifact }}" "${{ matrix.artifact }}.zip"
+          $dest = "$env:RUNNER_TEMP\pub\${{ matrix.site }}"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          Expand-Archive -Path $zip -DestinationPath $dest -Force
+          echo "PUB_DIR=$dest" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Install Web Deploy (msdeploy)
+        if: steps.dl.outcome == 'success'
+        run: choco install webdeploy --no-progress -y
+
+      - name: Deploy to IIS site with Web Deploy (AppOffline + retry)
+        if: steps.dl.outcome == 'success'
+        shell: cmd
+        env:
+          SERVER: https://${{ seccrets.IIS_SERVER }}/msdeploy.axd?site=${{ matrix.site }}
+          USER: ${{ seccrets.IIS_USER }}
+          PASS: ${{ seccrets.IIS_PASS }}                                
+          SRC:  ${{ env.PUB_DIR }}
+          SITE: ${{ matrix.site }}
+        run: >
+          "C:\Program Files\IIS\Microsoft Web Deploy V3\msdeploy.exe"
+          -verb:sync
+          -source:contentPath="%SRC%"
+          -dest:contentPath="%SITE%",ComputerName="%SERVER%",UserName="%USER%",Password="%PASS%",AuthType=Basic,IncludeAcls=False
+          -enableRule:AppOffline
+          -retryAttempts:3 -retryInterval:5000
+          -allowUntrusted

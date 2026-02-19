@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+
+jobs:
+  build_test:
+
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 9.0.x
+    - name: Restore dependencies
+      run: dotnet restore
+    - name: Build
+      run: dotnet build -c Release --no-restore
+    - name: Test
+      run: dotnet test --no-build --verbosity normal
+  
+  package:
+
+    runs-on: windows-latest
+    needs: build_test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # GRPC
+          - name: KB.PikselPlatform.BranchService.Api.Grpc
+            project: KB.PikselPlatform.BranchService.Api.Grpc/KB.PikselPlatform.BranchService.Api.Grpc.csproj 
+            project_dir: KB.PikselPlatform.BranchService.Api.Grpc
+
+          - name: KB.PikselPlatform.CourseService.Api.Grpc
+            project: KB.PikselPlatform.CourseService.Api.Grpc/KB.PikselPlatform.CourseService.Api.Grpc.csproj 
+            project_dir: KB.PikselPlatform.CourseService.Api.Grpc
+
+          - name: KB.PikselPlatform.InterviewService.Api.Grpc
+            project: KB.PikselPlatform.InterviewService.Api.Grpc/KB.PikselPlatform.InterviewService.Api.Grpc.csproj 
+            project_dir: KB.PikselPlatform.InterviewService.Api.Grpc
+
+          - name: KB.PikselPlatform.LeadService.Api.Grpc
+            project: KB.PikselPlatform.LeadService.Api.Grpc/KB.PikselPlatform.LeadService.Api.Grpc.csproj 
+            project_dir: KB.PikselPlatform.LeadService.Api.Grpc
+
+          - name: KB.PikselPlatform.LectureService.Api.Grpc
+            project: KB.PikselPlatform.LectureService.Api.Grpc/KB.PikselPlatform.LectureService.Api.Grpc.csproj 
+            project_dir: KB.PikselPlatform.LectureService.Api.Grpc
+
+          - name: KB.PikselPlatform.RegisterService.Api.Grpc
+            project: KB.PikselPlatform.RegisterService.Api.Grpc/KB.PikselPlatform.RegisterService.Api.Grpc.csproj 
+            project_dir: KB.PikselPlatform.RegisterService.Api.Grpc
+
+          - name: KB.PikselPlatform.UserService.Api.Grpc
+            project: KB.PikselPlatform.UserService.Api.Grpc/KB.PikselPlatform.UserService.Api.Grpc.csproj 
+            project_dir: KB.PikselPlatform.UserService.Api.Grpc
+
+          # REST
+          - name: KB.PikselPlatform.BranchService.Api.Rest
+            project: KB.PikselPlatform.BranchService.Api.Rest/KB.PikselPlatform.BranchService.Api.Rest.csproj 
+            project_dir: KB.PikselPlatform.BranchService.Api.Rest
+
+          - name: KB.PikselPlatform.CourseService.Api.Rest
+            project: KB.PikselPlatform.CourseService.Api.Rest/KB.PikselPlatform.CourseService.Api.Rest.csproj 
+            project_dir: KB.PikselPlatform.CourseService.Api.Rest
+
+          - name: KB.PikselPlatform.InterviewService.Api.Rest
+            project: KB.PikselPlatform.InterviewService.Api.Rest/KB.PikselPlatform.InterviewService.Api.Rest.csproj 
+            project_dir: KB.PikselPlatform.InterviewService.Api.Rest
+
+          - name: KB.PikselPlatform.LeadService.Api.Rest
+            project: KB.PikselPlatform.LeadService.Api.Rest/KB.PikselPlatform.LeadService.Api.Rest.csproj 
+            project_dir: KB.PikselPlatform.LeadService.Api.Rest
+
+          - name: KB.PikselPlatform.LectureService.Api.Rest
+            project: KB.PikselPlatform.LectureService.Api.Rest/KB.PikselPlatform.LectureService.Api.Rest.csproj 
+            project_dir: KB.PikselPlatform.LectureService.Api.Rest
+
+          - name: KB.PikselPlatform.RegisterService.Api.Rest
+            project: KB.PikselPlatform.RegisterService.Api.Rest/KB.PikselPlatform.RegisterService.Api.Rest.csproj 
+            project_dir: KB.PikselPlatform.RegisterService.Api.Rest
+
+          - name: KB.PikselPlatform.UserService.Api.Rest
+            project: KB.PikselPlatform.UserService.Api.Rest/KB.PikselPlatform.UserService.Api.Rest.csproj 
+            project_dir: KB.PikselPlatform.UserService.Api.Rest
+
+          #Gateway
+          - name: KB.PikselPlatform.ApiGateway
+            project: KB.PikselPlatform.ApiGateway/KB.PikselPlatform.ApiGateway.csproj 
+            project_dir: KB.PikselPlatform.ApiGateway
+
+          #UI
+          - name: KB.PikselPlatform.Admin.Ui
+            project: KB.PikselPlatform.Admin.Ui/KB.PikselPlatform.Admin.Ui.csproj 
+            project_dir: KB.PikselPlatform.Admin.Ui
+
+          - name: KB.PikselPlatform.Management.Ui
+            project: KB.PikselPlatform.Management.Ui/KB.PikselPlatform.Management.Ui.csproj 
+            project_dir: KB.PikselPlatform.Management.Ui
+
+          - name: KB.PikselPlatform.Portal.Ui
+            project: KB.PikselPlatform.Portal.Ui/KB.PikselPlatform.Portal.Ui.csproj 
+            project_dir: KB.PikselPlatform.Portal.Ui
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 9.0.x
+
+    - name: Has this service changed?
+      id: ch
+      uses: dorny/paths-filter@v3
+      with:
+        filters: |
+          changed:
+            - '${{ matrix.project_dir }}/**'
+
+    - name: Restore+Build (only if changed)
+      if: steps.ch.outputs.changed == 'true'
+      run: |
+        dotnet restore "${{ matrix.project }}"
+        dotnet build "${{ matrix.project }}" -c Release --no-restore
+
+    - name: Publish (only if changed)
+      if: steps.ch.outputs.changed == 'true'
+      run: |
+        $out = "$env:RUNNER_TEMP\pub\${{ matrix.name }}"
+        dotnet publish "${{ matrix.project }}" -c Release -o $out
+        echo "OUT_DIR=$out" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+    - name: Pack zip (only if changed)
+      if: steps.ch.outputs.changed == 'true'
+      run: |
+        $zip = "$env:RUNNER_TEMP\${{ matrix.name }}.zip"
+        Compress-Archive -Path "$env:OUT_DIR\*" -DestinationPath $zip -Force
+        echo "ZIP_PATH=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+    - name: Upload artifact (one per app)
+      if: steps.ch.outputs.changed == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.name }}
+        path: ${{ env.ZIP_PATH }}
+        if-no-files-found: error
