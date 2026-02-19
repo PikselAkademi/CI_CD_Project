@@ -1,0 +1,84 @@
+
+# İş akışı adı
+name: v2-cd-ftp-matrix
+
+# Bu iş akışı, v2-ci-ftp-matrix workflow'u tamamlandığında çalışır
+on:
+  workflow_run:
+    workflows:
+      - v2-ci-ftp-matrix
+    types:
+      - completed
+
+# İzin ayarları
+permissions:
+  actions: read
+  contents: read
+
+# İşler
+jobs:
+  # İş: CD adımlarını yürütür, publish çıktısını deploy eder
+  cd:
+    name: Deploy (${{ matrix.name }})
+    # Bu iş, bağımlı workflow başarılıysa ve bağımlı workflow main dalından geldiyse çalışır
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    # Strateji ayarı
+    strategy:
+      fail-fast: false
+      # Matrix ile paralel çalıştırma
+      matrix:
+        include:
+          # 1. uygulamanın bilgileri
+          - name: V2.Site #uygulama adı
+            target: site #uygulama türü
+            artifact: v2-site-publish #çıktının adı
+            server: ${{ secrets.V2_SITE_FTP_SERVER }} #FTP sunucusu
+            username: ${{ secrets.V2_SITE_FTP_USERNAME }} #FTP kullanıcı adı
+            password: ${{ secrets.V2_SITE_FTP_PASSWORD }} #FTP şifresi
+            server_dir: ${{ vars.V2_SITE_FTP_REMOTE_DIR }} #FTP sunucu yolu
+
+          # 2. uygulamanın bilgileri
+          - name: V2.Admin
+            target: admin
+            artifact: v2-admin-publish
+            server: ${{ secrets.V2_ADMIN_FTP_SERVER }}
+            username: ${{ secrets.V2_ADMIN_FTP_USERNAME }}
+            password: ${{ secrets.V2_ADMIN_FTP_PASSWORD }}
+            server_dir: ${{ vars.V2_ADMIN_FTP_REMOTE_DIR }}
+
+    # İşin adımları
+    steps:
+      # Adım: Artifact indirir
+      - name: Download artifact (if exists)
+        id: dl
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./artifact/${{ matrix.target }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+        continue-on-error: true
+
+      # Adım: FTP ile deploy eder
+      - name: Deploy via FTP
+        # Bu adım indirme adımı başarılıysa çalışır
+        if: steps.dl.outcome == 'success'
+        # Adım içinde kullanılan hazır action
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        # Hazır actiona parametreler gönderiliyor
+        with:
+          server: ${{ matrix.server }}
+          username: ${{ matrix.username }}
+          password: ${{ matrix.password }}
+          protocol: ftp #ftp veya ftps
+          port: 21
+          local-dir: ./artifact/site/
+          server-dir: ${{ matrix.server_dir }}
+          dangerous-clean-slate: false
+
+      # Adım: Artifact olmadığı için bilgilendirme mesajı yazar
+      - name: Skip Deploy Info
+        # Bu adım, indirme adımı başarısızsa çalışır
+        if: steps.dl.outcome != 'success'
+        run: echo "${{ matrix.name }} icin artifact olmadigi icin deploy atlandi."

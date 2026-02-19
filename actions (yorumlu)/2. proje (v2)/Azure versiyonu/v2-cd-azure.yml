@@ -1,0 +1,78 @@
+trigger: none
+pr: none
+
+# Bu iş akışı, v2-ci-azure pipeline'ı tamamlandığında çalışır
+resources:
+  pipelines:
+    - pipeline: ci
+      source: v2-ci-azure
+      trigger:
+        branches:
+          include:
+            - main
+
+# Ortam değişkenleri
+variables:
+  # Site için Azure servis bağlantısını saklayan değişken
+  V2_SITE_AZURE_SERVICE_CONNECTION: '$(V2_SITE_AZURE_SERVICE_CONNECTION)'
+  # Admin için Azure servis bağlantısını saklayan değişken
+  V2_ADMIN_AZURE_SERVICE_CONNECTION: '$(V2_ADMIN_AZURE_SERVICE_CONNECTION)'
+
+# Runner, işin çalışacağı konak makine
+pool:
+  vmImage: ubuntu-latest
+
+# İşler
+jobs:
+# İş: Artifact indirip hedef ortama deploy eder
+- job: deploy
+  displayName: CD Deploy (Matrix)
+  # Strateji ayarı
+  strategy:
+    # Matrix ile paralel çalıştırma
+    matrix:
+      # 1. uygulamanın bilgileri
+      V2Site:
+        target: site
+        artifactName: v2-site-publish
+        azureSubscription: $(V2_SITE_AZURE_SERVICE_CONNECTION)
+        appName: $(V2_SITE_AZURE_WEBAPP_NAME)
+
+      # 2. uygulamanın bilgileri
+      V2Admin:
+        target: admin
+        artifactName: v2-admin-publish
+        azureSubscription: $(V2_ADMIN_AZURE_SERVICE_CONNECTION)
+        appName: $(V2_ADMIN_AZURE_WEBAPP_NAME)
+
+  # İşin adımları
+  steps:
+  # Adım: Artifact indirir
+  - download: ci
+    artifact: $(artifactName)
+    continueOnError: true
+
+  # Adım: Artifact klasörünün varlığını kontrol eder
+  - bash: |
+      if [ -d "$(Pipeline.Workspace)/ci/$(artifactName)" ]; then
+        echo "##vso[task.setvariable variable=artifactExists]true"
+      else
+        echo "##vso[task.setvariable variable=artifactExists]false"
+      fi
+    displayName: Check Artifact
+
+  # Adım: Artifact olmadığı için bilgilendirme mesajı yazar
+  - bash: echo "No artifact for $(target). Skipping."
+    displayName: Skip if artifact not found
+    condition: ne(variables['artifactExists'], 'true')
+
+  # Adım: Azure Web App'e deploy eder
+  - task: AzureWebApp@1
+    displayName: Deploy Site to Azure Web App
+    # Bu adım, matrix hedefi site ise ve artifact varsa çalışır
+    condition: and(eq(variables['artifactExists'], 'true'), eq(variables['target'], 'site'))
+    inputs:
+      azureSubscription: '$(azureSubscription)'
+      appType: webApp
+      appName: '$(appName)'
+      package: '$(Pipeline.Workspace)/ci/$(artifactName)'

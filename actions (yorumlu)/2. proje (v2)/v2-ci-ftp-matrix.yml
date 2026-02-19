@@ -1,0 +1,108 @@
+
+# İş akışı adı
+name: v2-ci-ftp-matrix
+
+# Bu iş akışı, main dalına yapılan push, main dalına açılan PR ve manuel tetikleme ile çalışır
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+# Ortam değişkenleri
+env:
+  # Dotnet sürümünü saklayan değişken
+  DOTNET_VERSION: "10.0.x"
+
+# İşler
+jobs:
+  # İş: CI adımlarını yürütür (build/test/publish)
+  ci:
+    name: Build/Test/Publish (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    # Strateji ayarı
+    strategy:
+      fail-fast: false
+      # Matrix ile paralel çalıştırma
+      matrix:
+        include:
+          - name: V2.Site
+            target: site
+            project: V2.Site/V2.Site.csproj
+            test_project: V2.Site.Tests/V2.Site.Tests.csproj
+            project_dir: V2.Site
+            test_dir: V2.Site.Tests
+            artifact: v2-site-publish
+          - name: V2.Admin
+            target: admin
+            project: V2.Admin/V2.Admin.csproj
+            test_project: V2.Admin.Tests/V2.Admin.Tests.csproj
+            project_dir: V2.Admin
+            test_dir: V2.Admin.Tests
+            artifact: v2-admin-publish
+
+    # İşin adımları
+    steps:
+      # Adım: Repository içeriğini kullanıma hazırlar
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Adım: .NET SDK kurulumunu yapar
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Adım: Değişen dosyaları filtreler
+      - name: Has this project changed?
+        id: ch
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            changed:
+              - '${{ matrix.project_dir }}/**'
+              - '${{ matrix.test_dir }}/**'
+              - 'V2.Shared/**'
+              - 'V2.sln'
+
+      - name: Restore
+        # Bu adım, manuel tetiklendiyse veya değişiklik varsa çalışır
+        if: github.event_name == 'workflow_dispatch' || steps.ch.outputs.changed == 'true'
+        run: dotnet restore ${{ matrix.project }} && dotnet restore ${{ matrix.test_project }}
+
+      # Adım: dotnet build işlemi yapar
+      - name: Build
+        # Bu adım, manuel tetiklendiyse veya değişiklik varsa çalışır
+        if: github.event_name == 'workflow_dispatch' || steps.ch.outputs.changed == 'true'
+        run: dotnet build ${{ matrix.project }} --configuration Release --no-restore
+
+      # Adım: dotnet test işlemi yapar
+      - name: Test
+        # Bu adım, manuel tetiklendiyse veya değişiklik varsa çalışır
+        if: github.event_name == 'workflow_dispatch' || steps.ch.outputs.changed == 'true'
+        run: dotnet test ${{ matrix.test_project }} --configuration Release --no-restore --verbosity normal
+
+      # Adım: dotnet publish işlemi yapar 
+      - name: Publish
+        # Bu adım, manuel tetiklendiyse veya değişiklik varsa çalışır
+        if: github.event_name == 'workflow_dispatch' || steps.ch.outputs.changed == 'true'
+        run: dotnet publish ${{ matrix.project }} --configuration Release --output ./publish/${{ matrix.target }} --no-build
+
+      # Adım: Çıktıyı artifact olarak yükler
+      - name: Upload Artifact
+        # Bu adım, manuel tetiklendiyse veya değişiklik varsa çalışır
+        if: github.event_name == 'workflow_dispatch' || steps.ch.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./publish/${{ matrix.target }}
+          if-no-files-found: error
+
+      # Adım: Değişiklik olmadığı için bilgilendirme mesajı yazar
+      - name: Skip Info
+        # Bu adım, manuel tetikleme değilse ve değişiklik yoksa çalışır
+        if: github.event_name != 'workflow_dispatch' && steps.ch.outputs.changed != 'true'
+        run: echo "${{ matrix.name }} degismedigi icin atlandi."

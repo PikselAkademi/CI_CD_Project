@@ -1,0 +1,60 @@
+
+name: v2-cd-azure
+
+on:
+  workflow_run:
+    workflows:
+      - v2-ci-azure
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  deploy:
+    name: CD Deploy (${{ matrix.name }})
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: V2.Site 
+            target: site 
+            artifact: v2-site-publish 
+            app: ${{ vars.V2_SITE_AZURE_WEBAPP_NAME }} 
+            profile: ${{ secrets.V2_SITE_AZURE_WEBAPP_PUBLISH_PROFILE }} 
+
+          - name: V2.Admin
+            target: admin
+            artifact: v2-admin-publish
+            app: ${{ vars.V2_ADMIN_AZURE_WEBAPP_NAME }}
+            profile: ${{ secrets.V2_ADMIN_AZURE_WEBAPP_PUBLISH_PROFILE }} 
+
+    environment:
+      name: v2-${{ matrix.target }}-production
+
+    steps:
+      - name: Download artifact (if exists)
+        id: dl
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./artifact/${{ matrix.target }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+        continue-on-error: true
+
+      - name: Skip if artifact not found
+        if: steps.dl.outcome != 'success'
+        run: echo "No artifact for ${{ matrix.name }}. Skipping."
+
+      - name: Deploy Site to Azure Web App
+        if: matrix.target == 'site' && steps.dl.outcome == 'success'
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ matrix.app }}
+          publish-profile: ${{ matrix.profile }}
+          package: ./artifact/site

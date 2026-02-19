@@ -1,0 +1,220 @@
+# Bu iş akışı, main dalına yapılan push, main dalına açılan PR ve manuel tetikleme ile çalışır
+trigger:
+  branches:
+    include:
+      - main
+
+# PR doğrulama: main dalına
+pr:
+  branches:
+    include:
+      - main
+
+# Ortam değişkenleri
+variables:
+  # Dotnet sürümünü saklayan değişken
+  DOTNET_VERSION: '10.0.x'
+  # Site projesinin dosya yolu
+  SITE_PROJECT_PATH: 'V2.Site/V2.Site.csproj'
+  # Site test projesinin dosya yolu
+  SITE_TEST_PATH: 'V2.Site.Tests/V2.Site.Tests.csproj'
+  # Admin projesinin dosya yolu
+  ADMIN_PROJECT_PATH: 'V2.Admin/V2.Admin.csproj'
+  # Admin test projesinin dosya yolu
+  ADMIN_TEST_PATH: 'V2.Admin.Tests/V2.Admin.Tests.csproj'
+  # Site publish çıktısının yazılacağı klasör
+  SITE_PUBLISH_DIR: '$(Build.ArtifactStagingDirectory)/v2-site-publish'
+  # Admin publish çıktısının yazılacağı klasör
+  ADMIN_PUBLISH_DIR: '$(Build.ArtifactStagingDirectory)/v2-admin-publish'
+  # Site için Azure servis bağlantısını saklayan değişken
+  V2_SITE_AZURE_SERVICE_CONNECTION: '$(V2_SITE_AZURE_SERVICE_CONNECTION)'
+  # Admin için Azure servis bağlantısını saklayan değişken
+  V2_ADMIN_AZURE_SERVICE_CONNECTION: '$(V2_ADMIN_AZURE_SERVICE_CONNECTION)'
+
+# İşler
+jobs:
+# İş: Değişen modülleri tespit eder
+- job: detect_changes
+  displayName: Detect Changed Projects
+  # Runner, işin çalışacağı konak makine
+  pool:
+    vmImage: ubuntu-latest
+  # İşin adımları
+  steps:
+  # Adım: Repository içeriğini kullanıma hazırlar
+  - checkout: self
+    fetchDepth: 2
+
+  # Adım: Değişim bayraklarını hesaplar
+  - bash: |
+      CHANGED=$(git diff --name-only HEAD~1 HEAD || true)
+      shared=false
+      site=false
+      admin=false
+
+      if echo "$CHANGED" | grep -E '^V2.Shared/' >/dev/null; then shared=true; fi
+      if echo "$CHANGED" | grep -E '^V2.Site/|^V2.Site.Tests/|^V2.sln$' >/dev/null; then site=true; fi
+      if echo "$CHANGED" | grep -E '^V2.Admin/|^V2.Admin.Tests/|^V2.sln$' >/dev/null; then admin=true; fi
+
+      echo "##vso[task.setvariable variable=sharedChanged;isOutput=true]$shared"
+      echo "##vso[task.setvariable variable=siteChanged;isOutput=true]$site"
+      echo "##vso[task.setvariable variable=adminChanged;isOutput=true]$admin"
+    name: setvars
+    displayName: Compute Change Flags
+
+  # Adım: Çıktıyı yazdırır (UI özet bilgi için)
+  - bash: |
+      echo "shared_changed: $(setvars.sharedChanged)"
+      echo "site_changed: $(setvars.siteChanged)"
+      echo "admin_changed: $(setvars.adminChanged)"
+    displayName: Print Change Summary
+
+# İş: Site projesi için CI adımlarını yürütür
+- job: site_ci
+  displayName: CI Site (Build, Test, Publish)
+  dependsOn: detect_changes
+  # Bu iş, manuel tetiklendiyse, shared değişikliği varsa veya site değişikliği varsa çalışır
+  condition: or(eq(variables['Build.Reason'], 'Manual'), eq(dependencies.detect_changes.outputs['setvars.sharedChanged'], 'true'), eq(dependencies.detect_changes.outputs['setvars.siteChanged'], 'true'))
+  # Runner, işin çalışacağı konak makine
+  pool:
+    vmImage: ubuntu-latest
+  # İşin adımları
+  steps:
+  # Adım: Repository içeriğini kullanıma hazırlar
+  - checkout: self
+
+  # Adım: .NET SDK kurulumunu yapar
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  # Adım: dotnet restore işlemi yapar
+  - script: dotnet restore $(SITE_PROJECT_PATH)
+    displayName: Restore Site
+
+  # Adım: dotnet restore işlemi yapar
+  - script: dotnet restore $(SITE_TEST_PATH)
+    displayName: Restore Site Tests
+
+  # Adım: dotnet build işlemi yapar
+  - script: dotnet build $(SITE_PROJECT_PATH) -c Release --no-restore
+    displayName: Build Site
+
+  # Adım: dotnet test işlemi yapar
+  - script: dotnet test $(SITE_TEST_PATH) -c Release --verbosity normal --no-restore
+    displayName: Test Site
+
+  # Adım: dotnet publish işlemi yapar
+  - script: dotnet publish $(SITE_PROJECT_PATH) -c Release -o $(SITE_PUBLISH_DIR) --no-build
+    displayName: Publish Site
+
+  # Adım: Çıktıyı artifact olarak yükler
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: '$(SITE_PUBLISH_DIR)'
+      ArtifactName: 'v2-site-publish'
+      publishLocation: 'Container'
+
+# İş: Admin projesi için CI adımlarını yürütür
+- job: admin_ci
+  displayName: CI Admin (Build, Test, Publish)
+  dependsOn: detect_changes
+  # Bu iş, manuel tetiklendiyse, shared değişikliği varsa veya admin değişikliği varsa çalışır
+  condition: or(eq(variables['Build.Reason'], 'Manual'), eq(dependencies.detect_changes.outputs['setvars.sharedChanged'], 'true'), eq(dependencies.detect_changes.outputs['setvars.adminChanged'], 'true'))
+  # Runner, işin çalışacağı konak makine
+  pool:
+    vmImage: ubuntu-latest
+  # İşin adımları
+  steps:
+  # Adım: Repository içeriğini kullanıma hazırlar
+  - checkout: self
+
+  # Adım: .NET SDK kurulumunu yapar
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  # Adım: dotnet restore işlemi yapar
+  - script: dotnet restore $(ADMIN_PROJECT_PATH)
+    displayName: Restore Admin
+
+  # Adım: dotnet restore işlemi yapar
+  - script: dotnet restore $(ADMIN_TEST_PATH)
+    displayName: Restore Admin Tests
+
+  # Adım: dotnet build işlemi yapar
+  - script: dotnet build $(ADMIN_PROJECT_PATH) -c Release --no-restore
+    displayName: Build Admin
+
+  # Adım: dotnet test işlemi yapar
+  - script: dotnet test $(ADMIN_TEST_PATH) -c Release --verbosity normal --no-restore
+    displayName: Test Admin
+
+  # Adım: dotnet publish işlemi yapar
+  - script: dotnet publish $(ADMIN_PROJECT_PATH) -c Release -o $(ADMIN_PUBLISH_DIR) --no-build
+    displayName: Publish Admin
+
+  # Adım: Çıktıyı artifact olarak yükler
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: '$(ADMIN_PUBLISH_DIR)'
+      ArtifactName: 'v2-admin-publish'
+      publishLocation: 'Container'
+
+# İş: Site deploy adımlarını yürütür
+- job: site_cd
+  displayName: CD Site (Azure App Service)
+  dependsOn:
+    - detect_changes
+    - site_ci
+  # Bu iş, manuel tetiklendiyse, shared değişikliği varsa veya site değişikliği varsa çalışır
+  condition: and(succeeded(), or(eq(variables['Build.Reason'], 'Manual'), eq(dependencies.detect_changes.outputs['setvars.sharedChanged'], 'true'), eq(dependencies.detect_changes.outputs['setvars.siteChanged'], 'true')))
+  # Runner, işin çalışacağı konak makine
+  pool:
+    vmImage: ubuntu-latest
+  # İşin adımları
+  steps:
+  # Adım: Artifact indirir
+  - task: DownloadBuildArtifacts@0
+    inputs:
+      buildType: current
+      downloadType: single
+      artifactName: v2-site-publish
+      downloadPath: '$(Pipeline.Workspace)'
+
+  # Adım: Azure Web App'e deploy eder
+  - task: AzureWebApp@1
+    inputs:
+      azureSubscription: '$(V2_SITE_AZURE_SERVICE_CONNECTION)'
+      appType: webApp
+      appName: '$(V2_SITE_AZURE_WEBAPP_NAME)'
+      package: '$(Pipeline.Workspace)/v2-site-publish'
+
+# İş: Admin deploy adımlarını yürütür
+- job: admin_cd
+  displayName: CD Admin (Azure App Service)
+  dependsOn:
+    - detect_changes
+    - admin_ci
+  # Bu iş, manuel tetiklendiyse, shared değişikliği varsa veya admin değişikliği varsa; ayrıca PR değilse ve main dalındaysa çalışır
+  condition: and(succeeded(), or(eq(variables['Build.Reason'], 'Manual'), eq(dependencies.detect_changes.outputs['setvars.sharedChanged'], 'true'), eq(dependencies.detect_changes.outputs['setvars.adminChanged'], 'true')), ne(variables['Build.Reason'], 'PullRequest'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  # Runner, işin çalışacağı konak makine
+  pool:
+    vmImage: ubuntu-latest
+  # İşin adımları
+  steps:
+  # Adım: Artifact indirir
+  - task: DownloadBuildArtifacts@0
+    inputs:
+      buildType: current
+      downloadType: single
+      artifactName: v2-admin-publish
+      downloadPath: '$(Pipeline.Workspace)'
+
+  # Adım: Azure Web App'e deploy eder
+  - task: AzureWebApp@1
+    inputs:
+      azureSubscription: '$(V2_ADMIN_AZURE_SERVICE_CONNECTION)'
+      appType: webApp
+      appName: '$(V2_ADMIN_AZURE_WEBAPP_NAME)'
+      package: '$(Pipeline.Workspace)/v2-admin-publish'

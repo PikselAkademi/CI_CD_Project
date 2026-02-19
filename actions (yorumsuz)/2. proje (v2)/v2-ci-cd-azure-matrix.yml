@@ -1,0 +1,133 @@
+
+name: v2-ci-cd-azure-matrix
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  DOTNET_VERSION: "10.0.x"
+
+jobs:
+  ci:
+    name: Build/Test/Publish (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: V2.Site 
+            target: site 
+            project: V2.Site/V2.Site.csproj 
+            test_project: V2.Site.Tests/V2.Site.Tests.csproj 
+            project_dir: V2.Site 
+            test_dir: V2.Site.Tests 
+            artifact: v2-site-publish 
+
+          - name: V2.Admin
+            target: admin
+            project: V2.Admin/V2.Admin.csproj
+            test_project: V2.Admin.Tests/V2.Admin.Tests.csproj
+            project_dir: V2.Admin
+            test_dir: V2.Admin.Tests
+            artifact: v2-admin-publish
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Has this project changed?
+        id: ch
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            changed:
+              - '${{ matrix.project_dir }}/**'
+              - '${{ matrix.test_dir }}/**'
+              - 'V2.Shared/**'
+              - 'V2.sln'
+
+      - name: Restore
+        if: github.event_name == 'workflow_dispatch' || steps.ch.outputs.changed == 'true'
+        run: dotnet restore ${{ matrix.project }} && dotnet restore ${{ matrix.test_project }}
+
+      - name: Build
+        if: github.event_name == 'workflow_dispatch' || steps.ch.outputs.changed == 'true'
+        run: dotnet build ${{ matrix.project }} --configuration Release --no-restore
+
+      - name: Test
+        if: github.event_name == 'workflow_dispatch' || steps.ch.outputs.changed == 'true'
+        run: dotnet test ${{ matrix.test_project }} --configuration Release --no-restore --verbosity normal
+
+      - name: Publish
+        if: github.event_name == 'workflow_dispatch' || steps.ch.outputs.changed == 'true'
+        run: dotnet publish ${{ matrix.project }} --configuration Release --output ./publish/${{ matrix.target }} --no-build
+
+      - name: Upload Artifact
+        if: github.event_name == 'workflow_dispatch' || steps.ch.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./publish/${{ matrix.target }}
+          if-no-files-found: error
+
+      - name: Skip Info
+        if: github.event_name != 'workflow_dispatch' && steps.ch.outputs.changed != 'true'
+        run: echo "${{ matrix.name }} degismedigi icin atlandi."
+
+  cd:
+    name: Deploy (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    needs: ci
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: V2.Site
+            target: site 
+            artifact: v2-site-publish 
+
+
+          - name: V2.Admin
+            target: admin
+            artifact: v2-admin-publish
+
+    steps:
+      - name: Download Artifact (if exists)
+        id: dl
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./artifact/${{ matrix.target }}
+        continue-on-error: true
+
+      - name: Deploy Site to Azure Web App
+        if: matrix.target == 'site' && steps.dl.outcome == 'success'
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.V2_SITE_AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.V2_SITE_AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: ./artifact/site
+
+      - name: Deploy Admin to Azure Web App
+        if: matrix.target == 'admin' && steps.dl.outcome == 'success'
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.V2_ADMIN_AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.V2_ADMIN_AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: ./artifact/admin
+
+      - name: Skip Deploy Info
+        if: steps.dl.outcome != 'success'
+        run: echo "${{ matrix.name }} icin artifact olmadigi icin deploy atlandi."

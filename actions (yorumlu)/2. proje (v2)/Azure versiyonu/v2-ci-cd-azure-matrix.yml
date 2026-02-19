@@ -1,0 +1,178 @@
+# Bu iş akışı, main dalına yapılan push, main dalına açılan PR ve manuel tetikleme ile çalışır
+trigger:
+  branches:
+    include:
+      - main
+
+# PR doğrulama: main dalına
+pr:
+  branches:
+    include:
+      - main
+
+# Ortam değişkenleri
+variables:
+  # Dotnet sürümünü saklayan değişken
+  DOTNET_VERSION: '10.0.x'
+  # Site için Azure servis bağlantısını saklayan değişken
+  V2_SITE_AZURE_SERVICE_CONNECTION: '$(V2_SITE_AZURE_SERVICE_CONNECTION)'
+  # Admin için Azure servis bağlantısını saklayan değişken
+  V2_ADMIN_AZURE_SERVICE_CONNECTION: '$(V2_ADMIN_AZURE_SERVICE_CONNECTION)'
+
+# İşler
+jobs:
+# İş: CI adımlarını yürütür (build/test/publish)
+- job: ci
+  displayName: CI Matrix (Build, Test, Publish)
+  # Runner, işin çalışacağı konak makine
+  pool:
+    vmImage: ubuntu-latest
+  # Strateji ayarı
+  strategy:
+    # Matrix ile paralel çalıştırma
+    matrix:
+      V2Site:
+        projectName: V2.Site
+        projectPath: V2.Site/V2.Site.csproj
+        testPath: V2.Site.Tests/V2.Site.Tests.csproj
+        projectDir: V2.Site
+        testDir: V2.Site.Tests
+        artifactName: v2-site-publish
+        target: site
+      V2Admin:
+        projectName: V2.Admin
+        projectPath: V2.Admin/V2.Admin.csproj
+        testPath: V2.Admin.Tests/V2.Admin.Tests.csproj
+        projectDir: V2.Admin
+        testDir: V2.Admin.Tests
+        artifactName: v2-admin-publish
+        target: admin
+
+  # İşin adımları
+  steps:
+  # Adım: Repository içeriğini kullanıma hazırlar
+  - checkout: self
+    fetchDepth: 2
+
+  # Adım: .NET SDK kurulumunu yapar
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  # Adım: Bu proje için değişim bayrağını hesaplar
+  - bash: |
+      RUN_PROJECT=false
+      if [ "$(Build.Reason)" = "Manual" ]; then
+        RUN_PROJECT=true
+      else
+        CHANGED=$(git diff --name-only HEAD~1 HEAD || true)
+        if echo "$CHANGED" | grep -E "^$(projectDir)/|^$(testDir)/|^V2.Shared/|^V2.sln$" >/dev/null; then
+          RUN_PROJECT=true
+        fi
+      fi
+      echo "##vso[task.setvariable variable=runProject]$RUN_PROJECT"
+    displayName: Detect Changes for $(projectName)
+
+  # Adım: dotnet restore işlemi yapar
+  - script: dotnet restore $(projectPath) && dotnet restore $(testPath)
+    displayName: Restore $(projectName)
+    # Bu adım, bu proje çalıştırılacaksa çalışır
+    condition: eq(variables['runProject'], 'true')
+
+  # Adım: dotnet build işlemi yapar
+  - script: dotnet build $(projectPath) -c Release --no-restore
+    displayName: Build $(projectName)
+    # Bu adım, bu proje çalıştırılacaksa çalışır
+    condition: eq(variables['runProject'], 'true')
+
+  # Adım: dotnet test işlemi yapar
+  - script: dotnet test $(testPath) -c Release --no-restore --verbosity normal
+    displayName: Test $(projectName)
+    # Bu adım, bu proje çalıştırılacaksa çalışır
+    condition: eq(variables['runProject'], 'true')
+
+  # Adım: dotnet publish işlemi yapar
+  - script: dotnet publish $(projectPath) -c Release -o $(Build.ArtifactStagingDirectory)/$(target) --no-build
+    displayName: Publish $(projectName)
+    # Bu adım, bu proje çalıştırılacaksa çalışır
+    condition: eq(variables['runProject'], 'true')
+
+  # Adım: Çıktıyı artifact olarak yükler
+  - task: PublishBuildArtifacts@1
+    displayName: Publish Artifact $(artifactName)
+    # Bu adım, bu proje çalıştırılacaksa çalışır
+    condition: eq(variables['runProject'], 'true')
+    inputs:
+      PathtoPublish: '$(Build.ArtifactStagingDirectory)/$(target)'
+      ArtifactName: '$(artifactName)'
+      publishLocation: 'Container'
+
+# İş: CD adımlarını yürütür, publish çıktısını deploy eder
+- job: cd
+  displayName: CD Matrix (Deploy)
+  dependsOn: ci
+  # Bu iş, PR değilse ve main dalındaysa çalışır
+  condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  # Runner, işin çalışacağı konak makine
+  pool:
+    vmImage: ubuntu-latest
+  # Strateji ayarı
+  strategy:
+    # Matrix ile paralel çalıştırma
+    matrix:
+      V2Site:
+        projectName: V2.Site
+        artifactName: v2-site-publish
+        target: site
+      V2Admin:
+        projectName: V2.Admin
+        artifactName: v2-admin-publish
+        target: admin
+
+  # İşin adımları
+  steps:
+  # Adım: Artifact indirir
+  - task: DownloadBuildArtifacts@0
+    continueOnError: true
+    inputs:
+      buildType: current
+      downloadType: single
+      artifactName: '$(artifactName)'
+      downloadPath: '$(Pipeline.Workspace)/downloads'
+
+  # Adım: Artifact klasörünün varlığını kontrol eder
+  - bash: |
+      if [ -d "$(Pipeline.Workspace)/downloads/$(artifactName)" ]; then
+        echo "##vso[task.setvariable variable=artifactExists]true"
+      else
+        echo "##vso[task.setvariable variable=artifactExists]false"
+      fi
+    displayName: Check Artifact
+
+  # Adım: Siteyi Azure Web App'e deploy eder
+  - task: AzureWebApp@1
+    displayName: Deploy Site
+    # Bu adım, artifact varsa ve hedef site ise çalışır
+    condition: and(eq(variables['artifactExists'], 'true'), eq(variables['target'], 'site'))
+    inputs:
+      azureSubscription: '$(V2_SITE_AZURE_SERVICE_CONNECTION)'
+      appType: webApp
+      appName: '$(V2_SITE_AZURE_WEBAPP_NAME)'
+      package: '$(Pipeline.Workspace)/downloads/$(artifactName)'
+
+  # Adım: Admin panelini Azure Web App'e deploy eder
+  - task: AzureWebApp@1
+    displayName: Deploy Admin
+    # Bu adım, artifact varsa ve hedef admin ise çalışır
+    condition: and(eq(variables['artifactExists'], 'true'), eq(variables['target'], 'admin'))
+    inputs:
+      azureSubscription: '$(V2_ADMIN_AZURE_SERVICE_CONNECTION)'
+      appType: webApp
+      appName: '$(V2_ADMIN_AZURE_WEBAPP_NAME)'
+      package: '$(Pipeline.Workspace)/downloads/$(artifactName)'
+
+  # Adım: Artifact olmadığı için bilgilendirme mesajı yazar
+  - bash: echo "$(projectName) icin artifact olmadigi icin deploy atlandi."
+    displayName: Skip Deploy Info
+    # Bu adım, artifact yoksa çalışır
+    condition: ne(variables['artifactExists'], 'true')

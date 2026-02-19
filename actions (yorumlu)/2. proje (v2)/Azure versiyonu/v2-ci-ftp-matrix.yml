@@ -1,0 +1,108 @@
+# Bu iş akışı, main dalına yapılan push, main dalına açılan PR ve manuel tetikleme ile çalışır
+trigger:
+  branches:
+    include:
+      - main
+
+# PR doğrulama: main dalına
+pr:
+  branches:
+    include:
+      - main
+
+# Ortam değişkenleri
+variables:
+  # Dotnet sürümünü saklayan değişken
+  DOTNET_VERSION: '10.0.x'
+
+# İşler
+jobs:
+# İş: CI adımlarını yürütür (build/test/publish)
+- job: ci
+  displayName: CI Matrix (Build, Test, Publish)
+  # Runner, işin çalışacağı konak makine
+  pool:
+    vmImage: ubuntu-latest
+  # Strateji ayarı
+  strategy:
+    # Matrix ile paralel çalıştırma
+    matrix:
+      V2Site:
+        projectPath: V2.Site/V2.Site.csproj
+        testPath: V2.Site.Tests/V2.Site.Tests.csproj
+        projectDir: V2.Site
+        testDir: V2.Site.Tests
+        artifactName: v2-site-publish
+        target: site
+      V2Admin:
+        projectPath: V2.Admin/V2.Admin.csproj
+        testPath: V2.Admin.Tests/V2.Admin.Tests.csproj
+        projectDir: V2.Admin
+        testDir: V2.Admin.Tests
+        artifactName: v2-admin-publish
+        target: admin
+
+  # İşin adımları
+  steps:
+  # Adım: Repository içeriğini kullanıma hazırlar
+  - checkout: self
+    fetchDepth: 2
+
+  # Adım: .NET SDK kurulumunu yapar
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  # Adım: Bu proje için değişim bayrağını hesaplar
+  - bash: |
+      RUN_PROJECT=false
+      if [ "$(Build.Reason)" = "Manual" ]; then
+        RUN_PROJECT=true
+      else
+        CHANGED=$(git diff --name-only HEAD~1 HEAD || true)
+        if echo "$CHANGED" | grep -E "^$(projectDir)/|^$(testDir)/|^V2.Shared/|^V2.sln$" >/dev/null; then
+          RUN_PROJECT=true
+        fi
+      fi
+      echo "##vso[task.setvariable variable=runProject]$RUN_PROJECT"
+    displayName: Detect Changes for $(target)
+
+  # Adım: dotnet restore işlemi yapar
+  - script: dotnet restore $(projectPath) && dotnet restore $(testPath)
+    displayName: Restore
+    # Bu adım, manuel tetiklendiyse veya değişiklik varsa çalışır
+    condition: eq(variables['runProject'], 'true')
+
+  # Adım: dotnet build işlemi yapar
+  - script: dotnet build $(projectPath) -c Release --no-restore
+    displayName: Build
+    # Bu adım, manuel tetiklendiyse veya değişiklik varsa çalışır
+    condition: eq(variables['runProject'], 'true')
+
+  # Adım: dotnet test işlemi yapar
+  - script: dotnet test $(testPath) -c Release --no-restore --verbosity normal
+    displayName: Test
+    # Bu adım, manuel tetiklendiyse veya değişiklik varsa çalışır
+    condition: eq(variables['runProject'], 'true')
+
+  # Adım: dotnet publish işlemi yapar
+  - script: dotnet publish $(projectPath) -c Release -o $(Build.ArtifactStagingDirectory)/$(target) --no-build
+    displayName: Publish
+    # Bu adım, manuel tetiklendiyse veya değişiklik varsa çalışır
+    condition: eq(variables['runProject'], 'true')
+
+  # Adım: Çıktıyı artifact olarak yükler
+  - task: PublishBuildArtifacts@1
+    displayName: Publish Artifact
+    # Bu adım, manuel tetiklendiyse veya değişiklik varsa çalışır
+    condition: eq(variables['runProject'], 'true')
+    inputs:
+      PathtoPublish: '$(Build.ArtifactStagingDirectory)/$(target)'
+      ArtifactName: '$(artifactName)'
+      publishLocation: 'Container'
+
+  # Adım: Değişiklik olmadığı için bilgilendirme mesajı yazar
+  - bash: echo "$(target) degismedigi icin atlandi."
+    displayName: Skip Info
+    # Bu adım, değişiklik yoksa çalışır
+    condition: ne(variables['runProject'], 'true')

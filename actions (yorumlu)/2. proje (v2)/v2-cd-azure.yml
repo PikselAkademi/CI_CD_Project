@@ -1,0 +1,77 @@
+
+# İş akışı adı
+name: v2-cd-azure
+
+# Bu iş akışı, v2-ci-azure workflow'u tamamlandığında çalışır
+on:
+  workflow_run:
+    workflows:
+      - v2-ci-azure
+    types:
+      - completed
+
+# İzin ayarları
+permissions:
+  actions: read
+  contents: read
+
+# İşler
+jobs:
+  # İş: Artifact indirip hedef ortama deploy eder
+  deploy:
+    name: CD Deploy (${{ matrix.name }})
+    # Bu iş, bağımlı workflow başarılıysa ve bağımlı workflow main dalından geldiyse çalışır
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    # Strateji ayarı
+    strategy:
+      fail-fast: false
+      # Matrix ile paralel çalıştırma
+      matrix:
+        include:
+          #1. uygulama bilgisi
+          - name: V2.Site #uygulama adı
+            target: site #uygulama türü
+            artifact: v2-site-publish #çıktı adı
+            app: ${{ vars.V2_SITE_AZURE_WEBAPP_NAME }} #app service uygulama adı
+            profile: ${{ secrets.V2_SITE_AZURE_WEBAPP_PUBLISH_PROFILE }} #app servis publish profili
+
+          #2. uygulama bilgisi
+          - name: V2.Admin
+            target: admin
+            artifact: v2-admin-publish
+            app: ${{ vars.V2_ADMIN_AZURE_WEBAPP_NAME }}
+            profile: ${{ secrets.V2_ADMIN_AZURE_WEBAPP_PUBLISH_PROFILE }} 
+
+    # Ortam ayarı
+    environment:
+      name: v2-${{ matrix.target }}-production
+
+    # İşin adımları
+    steps:
+      # Adım: Artifact indirir
+      - name: Download artifact (if exists)
+        id: dl
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./artifact/${{ matrix.target }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+        continue-on-error: true
+
+      # Adım: Artifact olmadığı için bilgilendirme mesajı yazar
+      - name: Skip if artifact not found
+        # Bu adım, indirme adımı başarısızsa çalışır
+        if: steps.dl.outcome != 'success'
+        run: echo "No artifact for ${{ matrix.name }}. Skipping."
+
+      # Adım: Azure Web App'e deploy eder
+      - name: Deploy Site to Azure Web App
+        # Bu adım, matrix hedefi site ise ve indirme adımı başarılıysa çalışır
+        if: matrix.target == 'site' && steps.dl.outcome == 'success'
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ matrix.app }}
+          publish-profile: ${{ matrix.profile }}
+          package: ./artifact/site

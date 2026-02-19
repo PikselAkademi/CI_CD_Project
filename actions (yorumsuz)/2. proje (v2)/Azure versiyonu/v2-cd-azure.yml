@@ -1,0 +1,61 @@
+trigger: none
+pr: none
+
+resources:
+  pipelines:
+    - pipeline: ci
+      source: v2-ci-azure
+      trigger:
+        branches:
+          include:
+            - main
+
+variables:
+  V2_SITE_AZURE_SERVICE_CONNECTION: '$(V2_SITE_AZURE_SERVICE_CONNECTION)'
+  V2_ADMIN_AZURE_SERVICE_CONNECTION: '$(V2_ADMIN_AZURE_SERVICE_CONNECTION)'
+
+pool:
+  vmImage: ubuntu-latest
+
+jobs:
+- job: deploy
+  displayName: CD Deploy (Matrix)
+  strategy:
+    matrix:
+      V2Site:
+        target: site
+        artifactName: v2-site-publish
+        azureSubscription: $(V2_SITE_AZURE_SERVICE_CONNECTION)
+        appName: $(V2_SITE_AZURE_WEBAPP_NAME)
+
+      V2Admin:
+        target: admin
+        artifactName: v2-admin-publish
+        azureSubscription: $(V2_ADMIN_AZURE_SERVICE_CONNECTION)
+        appName: $(V2_ADMIN_AZURE_WEBAPP_NAME)
+
+  steps:
+  - download: ci
+    artifact: $(artifactName)
+    continueOnError: true
+
+  - bash: |
+      if [ -d "$(Pipeline.Workspace)/ci/$(artifactName)" ]; then
+        echo "##vso[task.setvariable variable=artifactExists]true"
+      else
+        echo "##vso[task.setvariable variable=artifactExists]false"
+      fi
+    displayName: Check Artifact
+
+  - bash: echo "No artifact for $(target). Skipping."
+    displayName: Skip if artifact not found
+    condition: ne(variables['artifactExists'], 'true')
+
+  - task: AzureWebApp@1
+    displayName: Deploy Site to Azure Web App
+    condition: and(eq(variables['artifactExists'], 'true'), eq(variables['target'], 'site'))
+    inputs:
+      azureSubscription: '$(azureSubscription)'
+      appType: webApp
+      appName: '$(appName)'
+      package: '$(Pipeline.Workspace)/ci/$(artifactName)'

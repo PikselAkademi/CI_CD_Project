@@ -1,0 +1,66 @@
+trigger: none
+pr: none
+
+resources:
+  pipelines:
+    - pipeline: ci
+      source: v2-ci-ftp-matrix
+      trigger:
+        branches:
+          include:
+            - main
+
+pool:
+  vmImage: ubuntu-latest
+
+jobs:
+- job: cd
+  displayName: CD Matrix (FTP/FTPS)
+  strategy:
+    matrix:
+      V2Site:
+        name: V2.Site
+        target: site
+        artifactName: v2-site-publish
+        ftpServer: $(V2_SITE_FTP_SERVER)
+        ftpUsername: $(V2_SITE_FTP_USERNAME)
+        ftpPassword: $(V2_SITE_FTP_PASSWORD)
+        ftpRemoteDir: $(V2_SITE_FTP_REMOTE_DIR)
+
+      V2Admin:
+        name: V2.Admin
+        target: admin
+        artifactName: v2-admin-publish
+        ftpServer: $(V2_ADMIN_FTP_SERVER)
+        ftpUsername: $(V2_ADMIN_FTP_USERNAME)
+        ftpPassword: $(V2_ADMIN_FTP_PASSWORD)
+        ftpRemoteDir: $(V2_ADMIN_FTP_REMOTE_DIR)
+
+  steps:
+  - download: ci
+    artifact: $(artifactName)
+    continueOnError: true
+
+  - bash: |
+      if [ -d "$(Pipeline.Workspace)/ci/$(artifactName)" ]; then
+        echo "##vso[task.setvariable variable=artifactExists]true"
+      else
+        echo "##vso[task.setvariable variable=artifactExists]false"
+      fi
+    displayName: Check Artifact
+
+  - bash: |
+      sudo apt-get update
+      sudo apt-get install -y lftp
+      lftp -u "$FTP_USERNAME","$FTP_PASSWORD" "$FTP_SERVER" -e "set ftp:ssl-force true; set ftp:ssl-protect-data true; mirror -R --verbose $(Pipeline.Workspace)/ci/v2-site-publish $FTP_REMOTE_DIR; bye"
+    displayName: Deploy via FTP
+    condition: eq(variables['artifactExists'], 'true')
+    env:
+      FTP_SERVER: $(ftpServer)
+      FTP_USERNAME: $(ftpUsername)
+      FTP_PASSWORD: $(ftpPassword)
+      FTP_REMOTE_DIR: $(ftpRemoteDir)
+
+  - bash: echo "$(name) icin artifact olmadigi icin deploy atlandi."
+    displayName: Skip Deploy Info
+    condition: ne(variables['artifactExists'], 'true')

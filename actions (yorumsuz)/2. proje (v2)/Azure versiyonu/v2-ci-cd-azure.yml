@@ -1,0 +1,165 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  DOTNET_VERSION: '10.0.x'
+  SITE_PROJECT_PATH: 'V2.Site/V2.Site.csproj'
+  SITE_TEST_PATH: 'V2.Site.Tests/V2.Site.Tests.csproj'
+  ADMIN_PROJECT_PATH: 'V2.Admin/V2.Admin.csproj'
+  ADMIN_TEST_PATH: 'V2.Admin.Tests/V2.Admin.Tests.csproj'
+  SITE_PUBLISH_DIR: '$(Build.ArtifactStagingDirectory)/v2-site-publish'
+  ADMIN_PUBLISH_DIR: '$(Build.ArtifactStagingDirectory)/v2-admin-publish'
+  V2_SITE_AZURE_SERVICE_CONNECTION: '$(V2_SITE_AZURE_SERVICE_CONNECTION)'
+  V2_ADMIN_AZURE_SERVICE_CONNECTION: '$(V2_ADMIN_AZURE_SERVICE_CONNECTION)'
+
+jobs:
+- job: detect_changes
+  displayName: Detect Changed Projects
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+  - checkout: self
+    fetchDepth: 2
+
+  - bash: |
+      CHANGED=$(git diff --name-only HEAD~1 HEAD || true)
+      shared=false
+      site=false
+      admin=false
+
+      if echo "$CHANGED" | grep -E '^V2.Shared/' >/dev/null; then shared=true; fi
+      if echo "$CHANGED" | grep -E '^V2.Site/|^V2.Site.Tests/|^V2.sln$' >/dev/null; then site=true; fi
+      if echo "$CHANGED" | grep -E '^V2.Admin/|^V2.Admin.Tests/|^V2.sln$' >/dev/null; then admin=true; fi
+
+      echo "##vso[task.setvariable variable=sharedChanged;isOutput=true]$shared"
+      echo "##vso[task.setvariable variable=siteChanged;isOutput=true]$site"
+      echo "##vso[task.setvariable variable=adminChanged;isOutput=true]$admin"
+    name: setvars
+    displayName: Compute Change Flags
+
+  - bash: |
+      echo "shared_changed: $(setvars.sharedChanged)"
+      echo "site_changed: $(setvars.siteChanged)"
+      echo "admin_changed: $(setvars.adminChanged)"
+    displayName: Print Change Summary
+
+- job: site_ci
+  displayName: CI Site (Build, Test, Publish)
+  dependsOn: detect_changes
+  condition: or(eq(variables['Build.Reason'], 'Manual'), eq(dependencies.detect_changes.outputs['setvars.sharedChanged'], 'true'), eq(dependencies.detect_changes.outputs['setvars.siteChanged'], 'true'))
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+  - checkout: self
+
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  - script: dotnet restore $(SITE_PROJECT_PATH)
+    displayName: Restore Site
+
+  - script: dotnet restore $(SITE_TEST_PATH)
+    displayName: Restore Site Tests
+
+  - script: dotnet build $(SITE_PROJECT_PATH) -c Release --no-restore
+    displayName: Build Site
+
+  - script: dotnet test $(SITE_TEST_PATH) -c Release --verbosity normal --no-restore
+    displayName: Test Site
+
+  - script: dotnet publish $(SITE_PROJECT_PATH) -c Release -o $(SITE_PUBLISH_DIR) --no-build
+    displayName: Publish Site
+
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: '$(SITE_PUBLISH_DIR)'
+      ArtifactName: 'v2-site-publish'
+      publishLocation: 'Container'
+
+- job: admin_ci
+  displayName: CI Admin (Build, Test, Publish)
+  dependsOn: detect_changes
+  condition: or(eq(variables['Build.Reason'], 'Manual'), eq(dependencies.detect_changes.outputs['setvars.sharedChanged'], 'true'), eq(dependencies.detect_changes.outputs['setvars.adminChanged'], 'true'))
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+  - checkout: self
+
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  - script: dotnet restore $(ADMIN_PROJECT_PATH)
+    displayName: Restore Admin
+
+  - script: dotnet restore $(ADMIN_TEST_PATH)
+    displayName: Restore Admin Tests
+
+  - script: dotnet build $(ADMIN_PROJECT_PATH) -c Release --no-restore
+    displayName: Build Admin
+
+  - script: dotnet test $(ADMIN_TEST_PATH) -c Release --verbosity normal --no-restore
+    displayName: Test Admin
+
+  - script: dotnet publish $(ADMIN_PROJECT_PATH) -c Release -o $(ADMIN_PUBLISH_DIR) --no-build
+    displayName: Publish Admin
+
+  - task: PublishBuildArtifacts@1
+    inputs:
+      PathtoPublish: '$(ADMIN_PUBLISH_DIR)'
+      ArtifactName: 'v2-admin-publish'
+      publishLocation: 'Container'
+
+- job: site_cd
+  displayName: CD Site (Azure App Service)
+  dependsOn:
+    - detect_changes
+    - site_ci
+  condition: and(succeeded(), or(eq(variables['Build.Reason'], 'Manual'), eq(dependencies.detect_changes.outputs['setvars.sharedChanged'], 'true'), eq(dependencies.detect_changes.outputs['setvars.siteChanged'], 'true')))
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+  - task: DownloadBuildArtifacts@0
+    inputs:
+      buildType: current
+      downloadType: single
+      artifactName: v2-site-publish
+      downloadPath: '$(Pipeline.Workspace)'
+
+  - task: AzureWebApp@1
+    inputs:
+      azureSubscription: '$(V2_SITE_AZURE_SERVICE_CONNECTION)'
+      appType: webApp
+      appName: '$(V2_SITE_AZURE_WEBAPP_NAME)'
+      package: '$(Pipeline.Workspace)/v2-site-publish'
+
+- job: admin_cd
+  displayName: CD Admin (Azure App Service)
+  dependsOn:
+    - detect_changes
+    - admin_ci
+  condition: and(succeeded(), or(eq(variables['Build.Reason'], 'Manual'), eq(dependencies.detect_changes.outputs['setvars.sharedChanged'], 'true'), eq(dependencies.detect_changes.outputs['setvars.adminChanged'], 'true')), ne(variables['Build.Reason'], 'PullRequest'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+  - task: DownloadBuildArtifacts@0
+    inputs:
+      buildType: current
+      downloadType: single
+      artifactName: v2-admin-publish
+      downloadPath: '$(Pipeline.Workspace)'
+
+  - task: AzureWebApp@1
+    inputs:
+      azureSubscription: '$(V2_ADMIN_AZURE_SERVICE_CONNECTION)'
+      appType: webApp
+      appName: '$(V2_ADMIN_AZURE_WEBAPP_NAME)'
+      package: '$(Pipeline.Workspace)/v2-admin-publish'

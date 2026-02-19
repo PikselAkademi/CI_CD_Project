@@ -1,0 +1,139 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  DOTNET_VERSION: '10.0.x'
+  V2_SITE_AZURE_SERVICE_CONNECTION: '$(V2_SITE_AZURE_SERVICE_CONNECTION)'
+  V2_ADMIN_AZURE_SERVICE_CONNECTION: '$(V2_ADMIN_AZURE_SERVICE_CONNECTION)'
+
+jobs:
+- job: ci
+  displayName: CI Matrix (Build, Test, Publish)
+  pool:
+    vmImage: ubuntu-latest
+  strategy:
+    matrix:
+      V2Site:
+        projectName: V2.Site
+        projectPath: V2.Site/V2.Site.csproj
+        testPath: V2.Site.Tests/V2.Site.Tests.csproj
+        projectDir: V2.Site
+        testDir: V2.Site.Tests
+        artifactName: v2-site-publish
+        target: site
+      V2Admin:
+        projectName: V2.Admin
+        projectPath: V2.Admin/V2.Admin.csproj
+        testPath: V2.Admin.Tests/V2.Admin.Tests.csproj
+        projectDir: V2.Admin
+        testDir: V2.Admin.Tests
+        artifactName: v2-admin-publish
+        target: admin
+
+  steps:
+  - checkout: self
+    fetchDepth: 2
+
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  - bash: |
+      RUN_PROJECT=false
+      if [ "$(Build.Reason)" = "Manual" ]; then
+        RUN_PROJECT=true
+      else
+        CHANGED=$(git diff --name-only HEAD~1 HEAD || true)
+        if echo "$CHANGED" | grep -E "^$(projectDir)/|^$(testDir)/|^V2.Shared/|^V2.sln$" >/dev/null; then
+          RUN_PROJECT=true
+        fi
+      fi
+      echo "##vso[task.setvariable variable=runProject]$RUN_PROJECT"
+    displayName: Detect Changes for $(projectName)
+
+  - script: dotnet restore $(projectPath) && dotnet restore $(testPath)
+    displayName: Restore $(projectName)
+    condition: eq(variables['runProject'], 'true')
+
+  - script: dotnet build $(projectPath) -c Release --no-restore
+    displayName: Build $(projectName)
+    condition: eq(variables['runProject'], 'true')
+
+  - script: dotnet test $(testPath) -c Release --no-restore --verbosity normal
+    displayName: Test $(projectName)
+    condition: eq(variables['runProject'], 'true')
+
+  - script: dotnet publish $(projectPath) -c Release -o $(Build.ArtifactStagingDirectory)/$(target) --no-build
+    displayName: Publish $(projectName)
+    condition: eq(variables['runProject'], 'true')
+
+  - task: PublishBuildArtifacts@1
+    displayName: Publish Artifact $(artifactName)
+    condition: eq(variables['runProject'], 'true')
+    inputs:
+      PathtoPublish: '$(Build.ArtifactStagingDirectory)/$(target)'
+      ArtifactName: '$(artifactName)'
+      publishLocation: 'Container'
+
+- job: cd
+  displayName: CD Matrix (Deploy)
+  dependsOn: ci
+  condition: and(succeeded(), ne(variables['Build.Reason'], 'PullRequest'), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  pool:
+    vmImage: ubuntu-latest
+  strategy:
+    matrix:
+      V2Site:
+        projectName: V2.Site
+        artifactName: v2-site-publish
+        target: site
+      V2Admin:
+        projectName: V2.Admin
+        artifactName: v2-admin-publish
+        target: admin
+
+  steps:
+  - task: DownloadBuildArtifacts@0
+    continueOnError: true
+    inputs:
+      buildType: current
+      downloadType: single
+      artifactName: '$(artifactName)'
+      downloadPath: '$(Pipeline.Workspace)/downloads'
+
+  - bash: |
+      if [ -d "$(Pipeline.Workspace)/downloads/$(artifactName)" ]; then
+        echo "##vso[task.setvariable variable=artifactExists]true"
+      else
+        echo "##vso[task.setvariable variable=artifactExists]false"
+      fi
+    displayName: Check Artifact
+
+  - task: AzureWebApp@1
+    displayName: Deploy Site
+    condition: and(eq(variables['artifactExists'], 'true'), eq(variables['target'], 'site'))
+    inputs:
+      azureSubscription: '$(V2_SITE_AZURE_SERVICE_CONNECTION)'
+      appType: webApp
+      appName: '$(V2_SITE_AZURE_WEBAPP_NAME)'
+      package: '$(Pipeline.Workspace)/downloads/$(artifactName)'
+
+  - task: AzureWebApp@1
+    displayName: Deploy Admin
+    condition: and(eq(variables['artifactExists'], 'true'), eq(variables['target'], 'admin'))
+    inputs:
+      azureSubscription: '$(V2_ADMIN_AZURE_SERVICE_CONNECTION)'
+      appType: webApp
+      appName: '$(V2_ADMIN_AZURE_WEBAPP_NAME)'
+      package: '$(Pipeline.Workspace)/downloads/$(artifactName)'
+
+  - bash: echo "$(projectName) icin artifact olmadigi icin deploy atlandi."
+    displayName: Skip Deploy Info
+    condition: ne(variables['artifactExists'], 'true')

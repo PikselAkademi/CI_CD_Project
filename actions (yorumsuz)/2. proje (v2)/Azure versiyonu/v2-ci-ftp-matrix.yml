@@ -1,0 +1,83 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  DOTNET_VERSION: '10.0.x'
+
+jobs:
+- job: ci
+  displayName: CI Matrix (Build, Test, Publish)
+  pool:
+    vmImage: ubuntu-latest
+  strategy:
+    matrix:
+      V2Site:
+        projectPath: V2.Site/V2.Site.csproj
+        testPath: V2.Site.Tests/V2.Site.Tests.csproj
+        projectDir: V2.Site
+        testDir: V2.Site.Tests
+        artifactName: v2-site-publish
+        target: site
+      V2Admin:
+        projectPath: V2.Admin/V2.Admin.csproj
+        testPath: V2.Admin.Tests/V2.Admin.Tests.csproj
+        projectDir: V2.Admin
+        testDir: V2.Admin.Tests
+        artifactName: v2-admin-publish
+        target: admin
+
+  steps:
+  - checkout: self
+    fetchDepth: 2
+
+  - task: UseDotNet@2
+    inputs:
+      version: '$(DOTNET_VERSION)'
+
+  - bash: |
+      RUN_PROJECT=false
+      if [ "$(Build.Reason)" = "Manual" ]; then
+        RUN_PROJECT=true
+      else
+        CHANGED=$(git diff --name-only HEAD~1 HEAD || true)
+        if echo "$CHANGED" | grep -E "^$(projectDir)/|^$(testDir)/|^V2.Shared/|^V2.sln$" >/dev/null; then
+          RUN_PROJECT=true
+        fi
+      fi
+      echo "##vso[task.setvariable variable=runProject]$RUN_PROJECT"
+    displayName: Detect Changes for $(target)
+
+  - script: dotnet restore $(projectPath) && dotnet restore $(testPath)
+    displayName: Restore
+    condition: eq(variables['runProject'], 'true')
+
+  - script: dotnet build $(projectPath) -c Release --no-restore
+    displayName: Build
+    condition: eq(variables['runProject'], 'true')
+
+  - script: dotnet test $(testPath) -c Release --no-restore --verbosity normal
+    displayName: Test
+    condition: eq(variables['runProject'], 'true')
+
+  - script: dotnet publish $(projectPath) -c Release -o $(Build.ArtifactStagingDirectory)/$(target) --no-build
+    displayName: Publish
+    condition: eq(variables['runProject'], 'true')
+
+  - task: PublishBuildArtifacts@1
+    displayName: Publish Artifact
+    condition: eq(variables['runProject'], 'true')
+    inputs:
+      PathtoPublish: '$(Build.ArtifactStagingDirectory)/$(target)'
+      ArtifactName: '$(artifactName)'
+      publishLocation: 'Container'
+
+  - bash: echo "$(target) degismedigi icin atlandi."
+    displayName: Skip Info
+    condition: ne(variables['runProject'], 'true')

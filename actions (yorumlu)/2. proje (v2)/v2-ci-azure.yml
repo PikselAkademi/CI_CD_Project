@@ -1,0 +1,163 @@
+
+# İş akışı adı
+name: v2-ci-azure
+
+# Bu iş akışı, main dalına yapılan push, main dalına açılan PR ve manuel tetikleme ile çalışır
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+
+# Ortam değişkenleri
+env:
+  # Dotnet sürümünü saklayan değişken
+  DOTNET_VERSION: "10.0.x"
+  # Site projesinin dosya yolu
+  SITE_PROJECT_PATH: "V2.Site/V2.Site.csproj"
+  # Site test projesinin dosya yolu
+  SITE_TEST_PATH: "V2.Site.Tests/V2.Site.Tests.csproj"
+  # Admin projesinin dosya yolu
+  ADMIN_PROJECT_PATH: "V2.Admin/V2.Admin.csproj"
+  # Admin test projesinin dosya yolu
+  ADMIN_TEST_PATH: "V2.Admin.Tests/V2.Admin.Tests.csproj"
+  # Site publish çıktısının yazılacağı klasör
+  SITE_PUBLISH_DIR: "v2-site-publish"
+  # Admin publish çıktısının yazılacağı klasör
+  ADMIN_PUBLISH_DIR: "v2-admin-publish"
+
+# İşler
+jobs:
+  # İş: Değişen modülleri tespit eder
+  detect_changes:
+    name: Detect Changed Projects
+    runs-on: ubuntu-latest
+    # İş çıktıları
+    outputs:
+      shared_changed: ${{ steps.filter.outputs.shared }}
+      site_changed: ${{ steps.filter.outputs.site }}
+      admin_changed: ${{ steps.filter.outputs.admin }}
+
+    # İşin adımları
+    steps:
+      # Adım: Repository içeriğini kullanıma hazırlar
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Adım: Değişen dosyaları filtreler
+      - name: Path Filter
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            shared:
+              - 'V2.Shared/**'
+            site:
+              - 'V2.Site/**'
+              - 'V2.Site.Tests/**'
+              - 'V2.sln'
+            admin:
+              - 'V2.Admin/**'
+              - 'V2.Admin.Tests/**'
+              - 'V2.sln'
+
+  site_ci:
+    name: CI Site (Build, Test, Publish)
+    runs-on: ubuntu-latest
+    needs: detect_changes
+    # Bu iş, manuel tetiklendiyse, shared değişikliği varsa veya site değişikliği varsa çalışır
+    if: github.event_name == 'workflow_dispatch' || needs.detect_changes.outputs.shared_changed == 'true' || needs.detect_changes.outputs.site_changed == 'true'
+
+    # İşin adımları
+    steps:
+      # Adım: Repository içeriğini kullanıma hazırlar
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Adım: .NET SDK kurulumunu yapar
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Adım: dotnet restore işlemi yapar
+      - name: Restore Site
+        run: dotnet restore ${{ env.SITE_PROJECT_PATH }}
+
+      # Adım: dotnet restore işlemi yapar
+      - name: Restore Site Tests
+        run: dotnet restore ${{ env.SITE_TEST_PATH }}
+
+      # Adım: dotnet build işlemi yapar 
+      - name: Build Site
+        run: dotnet build ${{ env.SITE_PROJECT_PATH }} --configuration Release --no-restore
+
+      # Adım: dotnet test işlemi yapar 
+      - name: Test Site
+        run: dotnet test ${{ env.SITE_TEST_PATH }} --configuration Release --verbosity normal --no-restore
+
+      # Adım: dotnet publish işlemi yapar 
+      - name: Publish Site
+        run: dotnet publish ${{ env.SITE_PROJECT_PATH }} --configuration Release --output ${{ env.SITE_PUBLISH_DIR }} --no-build
+
+      # Adım: Çıktıyı artifact olarak yükler
+      - name: Upload Site Artifact
+        # Adım içinde kullanılan hazır action
+        uses: actions/upload-artifact@v4
+        # Hazır actiona parametreler gönderiliyor
+        with:
+          name: v2-site-publish
+          path: ${{ env.SITE_PUBLISH_DIR }}
+          if-no-files-found: error
+
+  # İş: Admin projesi için CI adımlarını yürütür
+  admin_ci:
+    name: CI Admin (Build, Test, Publish)
+    runs-on: ubuntu-latest
+    needs: detect_changes
+    # Bu iş, manuel tetiklendiyse, shared değişikliği varsa veya admin değişikliği varsa çalışır
+    if: github.event_name == 'workflow_dispatch' || needs.detect_changes.outputs.shared_changed == 'true' || needs.detect_changes.outputs.admin_changed == 'true'
+
+    # İşin adımları
+    steps:
+      # Adım: Repository içeriğini kullanıma hazırlar
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Adım: .NET SDK kurulumunu yapar
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # Adım: dotnet restore işlemi yapar
+      - name: Restore Admin
+        run: dotnet restore ${{ env.ADMIN_PROJECT_PATH }}
+
+      # Adım: dotnet restore işlemi yapar
+      - name: Restore Admin Tests
+        run: dotnet restore ${{ env.ADMIN_TEST_PATH }}
+
+      # Adım: dotnet build işlemi yapar 
+      - name: Build Admin
+        run: dotnet build ${{ env.ADMIN_PROJECT_PATH }} --configuration Release --no-restore
+
+      # Adım: dotnet test işlemi yapar 
+      - name: Test Admin
+        run: dotnet test ${{ env.ADMIN_TEST_PATH }} --configuration Release --verbosity normal --no-restore
+
+      # Adım: dotnet publish işlemi yapar
+      - name: Publish Admin
+        run: dotnet publish ${{ env.ADMIN_PROJECT_PATH }} --configuration Release --output ${{ env.ADMIN_PUBLISH_DIR }} --no-build
+
+      # Adım: Çıktıyı artifact olarak yükler
+      - name: Upload Admin Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-admin-publish
+          path: ${{ env.ADMIN_PUBLISH_DIR }}
+          if-no-files-found: error

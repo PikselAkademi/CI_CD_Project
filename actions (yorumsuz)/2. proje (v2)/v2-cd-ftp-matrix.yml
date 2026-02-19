@@ -1,0 +1,66 @@
+
+name: v2-cd-ftp-matrix
+
+on:
+  workflow_run:
+    workflows:
+      - v2-ci-ftp-matrix
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  cd:
+    name: Deploy (${{ matrix.name }})
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: V2.Site
+            target: site
+            artifact: v2-site-publish 
+            server: ${{ secrets.V2_SITE_FTP_SERVER }} 
+            username: ${{ secrets.V2_SITE_FTP_USERNAME }} 
+            password: ${{ secrets.V2_SITE_FTP_PASSWORD }} 
+            server_dir: ${{ vars.V2_SITE_FTP_REMOTE_DIR }} 
+
+          - name: V2.Admin
+            target: admin
+            artifact: v2-admin-publish
+            server: ${{ secrets.V2_ADMIN_FTP_SERVER }}
+            username: ${{ secrets.V2_ADMIN_FTP_USERNAME }}
+            password: ${{ secrets.V2_ADMIN_FTP_PASSWORD }}
+            server_dir: ${{ vars.V2_ADMIN_FTP_REMOTE_DIR }}
+
+    steps:
+      - name: Download artifact (if exists)
+        id: dl
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ./artifact/${{ matrix.target }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+        continue-on-error: true
+
+      - name: Deploy via FTP
+        if: steps.dl.outcome == 'success'
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ matrix.server }}
+          username: ${{ matrix.username }}
+          password: ${{ matrix.password }}
+          protocol: ftp 
+          port: 21
+          local-dir: ./artifact/site/
+          server-dir: ${{ matrix.server_dir }}
+          dangerous-clean-slate: false
+
+      - name: Skip Deploy Info
+        if: steps.dl.outcome != 'success'
+        run: echo "${{ matrix.name }} icin artifact olmadigi icin deploy atlandi."
